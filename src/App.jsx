@@ -83,13 +83,13 @@ function personWorkDays(person) {
 
 function FieldLabel({ children }) { return <label className="text-sm font-bold text-slate-700">{children}</label>; }
 function TextInput(props) {
-  return <input {...props} className={`w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 ${props.className || ""}`} />;
+  return <input {...props} className={`w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 ${props.className || ""}`} />;
 }
 function TextAreaInput(props) {
-  return <textarea {...props} className={`w-full min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 ${props.className || ""}`} />;
+  return <textarea {...props} className={`w-full min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 ${props.className || ""}`} />;
 }
 function SelectInput({ value, onChange, children }) {
-  return <select value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50">{children}</select>;
+  return <select value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50">{children}</select>;
 }
 function Card({ children, className = "" }) {
   return <div className={`overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm ${className}`}>{children}</div>;
@@ -97,10 +97,10 @@ function Card({ children, className = "" }) {
 function Button({ children, onClick, variant = "primary", disabled = false, className = "", type = "button" }) {
   const base = "inline-flex min-h-12 items-center justify-center rounded-2xl px-4 py-3 text-base font-bold transition disabled:cursor-not-allowed disabled:opacity-40";
   const styles = variant === "outline"
-    ? "border border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
+    ? "border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
     : variant === "ghost"
       ? "bg-white text-slate-500 hover:bg-red-50 hover:text-red-600"
-      : "bg-blue-600 text-white hover:bg-blue-700";
+      : "bg-emerald-600 text-white hover:bg-emerald-700";
   return <button type={type} onClick={onClick} disabled={disabled} className={`${base} ${styles} ${className}`}>{children}</button>;
 }
 
@@ -110,10 +110,10 @@ function DateCalendar({ displayMonth, selectedDates, onToggle, onPrevMonth, onNe
   const [year, month] = displayMonth.split("-");
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="mb-3 grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-2xl bg-blue-50 px-2 py-2 text-base font-bold text-slate-800">
-        <button type="button" onClick={onPrevMonth} className="rounded-xl bg-white px-3 py-2 text-sm font-bold text-blue-700 shadow-sm">前月</button>
+      <div className="mb-3 grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-2xl bg-emerald-50 px-2 py-2 text-base font-bold text-slate-800">
+        <button type="button" onClick={onPrevMonth} className="rounded-xl bg-white px-3 py-2 text-sm font-bold text-emerald-700 shadow-sm">前月</button>
         <div className="text-center">{year}年{Number(month)}月</div>
-        <button type="button" onClick={onNextMonth} className="rounded-xl bg-white px-3 py-2 text-sm font-bold text-blue-700 shadow-sm">次月</button>
+        <button type="button" onClick={onNextMonth} className="rounded-xl bg-white px-3 py-2 text-sm font-bold text-emerald-700 shadow-sm">次月</button>
       </div>
       <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-500">
         {weekdays.map((weekday) => <div key={weekday}>{weekday}</div>)}
@@ -122,7 +122,7 @@ function DateCalendar({ displayMonth, selectedDates, onToggle, onPrevMonth, onNe
         {days.map((date, index) => {
           if (!date) return <div key={`empty-${index}`} className="h-11" />;
           const selected = selectedDates.includes(date);
-          return <button key={date} type="button" onClick={() => onToggle(date)} className={`h-11 rounded-2xl text-base transition ${selected ? "bg-blue-600 font-bold text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-orange-50"}`}>{Number(date.slice(-2))}</button>;
+          return <button key={date} type="button" onClick={() => onToggle(date)} className={`h-11 rounded-2xl text-base transition ${selected ? "bg-emerald-600 font-bold text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-orange-50"}`}>{Number(date.slice(-2))}</button>;
         })}
       </div>
     </div>
@@ -151,9 +151,10 @@ function LoginScreen({ onLoggedIn }) {
   return (
     <div className="min-h-screen bg-slate-50 p-4 flex items-center justify-center">
       <Card className="w-full max-w-md">
+        <div className="h-2 w-full bg-gradient-to-r from-emerald-500 via-orange-400 to-pink-500" />
         <div className="p-6 space-y-5">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-600">Sowers FC System</p>
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-600">Sowers FC System</p>
             <h1 className="mt-2 text-2xl font-black">ログイン</h1>
             <p className="mt-2 text-sm text-slate-600">発行されたIDとパスワードでログインしてください。</p>
           </div>
@@ -500,9 +501,9 @@ function MainSystem({ session, profile }) {
       <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_560px] print:block">
         <section className="space-y-4 print:hidden">
           <div className="space-y-3">
-            <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
-              <div className="mb-4 h-2 w-24 rounded-full bg-orange-500" />
-              <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-600">Sowers FC System</p>
+            <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <div className="mb-4 h-2 w-24 rounded-full bg-gradient-to-r from-emerald-500 via-orange-400 to-pink-500" />
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-600">Sowers FC System</p>
               <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">教室管理システム</h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">{school.name} / {profile.display_name || session.user.email}</p>
             </div>
@@ -520,14 +521,14 @@ function MainSystem({ session, profile }) {
               <Button variant="outline" onClick={printInvoice} className="w-full"><Printer className="mr-1 h-4 w-4" />印刷</Button>
               <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
             </div>
-            {saveMessage && <div className="rounded-2xl bg-blue-50 p-3 text-sm font-bold text-blue-700">{saveMessage}</div>}
+            {saveMessage && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{saveMessage}</div>}
           </div>
 
           {mode === "invoice" ? (
             <>
               <Card>
                 <div className="space-y-4 p-4 md:p-5">
-                  <div className="h-1.5 w-20 rounded-full bg-blue-600" />
+                  <div className="h-1.5 w-20 rounded-full bg-pink-500" />
                   <h2 className="text-lg font-black">1. 基本情報</h2>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="space-y-2 md:col-span-2">
@@ -578,7 +579,7 @@ function MainSystem({ session, profile }) {
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {people.map((person, index) => {
                       const isActive = person.id === actualActivePersonId;
-                      return <button key={person.id} type="button" onClick={() => setActivePersonId(person.id)} className={`shrink-0 rounded-2xl border px-4 py-3 text-left text-sm font-bold transition ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-orange-300 hover:bg-orange-50"}`}>{person.name || `人物${index + 1}`}<br /><span className="text-xs opacity-80">{yen(personSubtotal(person))}</span></button>;
+                      return <button key={person.id} type="button" onClick={() => setActivePersonId(person.id)} className={`shrink-0 rounded-2xl border px-4 py-3 text-left text-sm font-bold transition ${isActive ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-orange-300 hover:bg-orange-50"}`}>{person.name || `人物${index + 1}`}<br /><span className="text-xs opacity-80">{yen(personSubtotal(person))}</span></button>;
                     })}
                   </div>
 
@@ -644,7 +645,7 @@ function MainSystem({ session, profile }) {
 
                       <Button onClick={() => addWork(activePerson.id)} variant="outline" className="w-full"><Plus className="mr-1 h-4 w-4" />この人物に担当業務を追加</Button>
 
-                      <div className="rounded-3xl bg-blue-600 p-4 text-white">
+                      <div className="rounded-3xl bg-emerald-600 p-4 text-white">
                         <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                           <span>人物別出勤日数：<b>{personWorkDays(activePerson)}日</b></span>
                           <span>人物別合計：<b>{yen(personSubtotal(activePerson))}</b></span>
@@ -748,7 +749,7 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
           <Button onClick={addStudent} className="w-full sm:w-auto"><Plus className="mr-1 h-4 w-4" />生徒を追加</Button>
         </div>
 
-        {message && <div className="rounded-2xl bg-blue-50 p-3 text-sm font-bold text-blue-700">{message}</div>}
+        {message && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</div>}
 
         {studentStats && (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -761,7 +762,7 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
 
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
           {Array.from({ length: 9 }, (_, i) => i + 1).map((page) => (
-            <button key={page} type="button" onClick={() => setRosterPage(page)} className={`rounded-2xl border px-3 py-2 text-sm font-bold ${rosterPage === page ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>ページ{page}</button>
+            <button key={page} type="button" onClick={() => setRosterPage(page)} className={`rounded-2xl border px-3 py-2 text-sm font-bold ${rosterPage === page ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>ページ{page}</button>
           ))}
         </div>
 
@@ -831,8 +832,8 @@ function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer
   return (
     <Card className="print:rounded-none print:shadow-none">
       <div id="invoice-pdf-area" className="bg-white p-4 md:p-8 print:p-0">
-        <div className="mb-6 border-b-2 border-blue-600 pb-4">
-          <p className="text-center text-xs font-bold uppercase tracking-[0.3em] text-blue-600">Sowers Franchise System</p>
+        <div className="mb-6 border-b-2 border-emerald-600 pb-4">
+          <p className="text-center text-xs font-bold uppercase tracking-[0.3em] text-emerald-600">Sowers Franchise System</p>
           <h2 className="mt-1 text-center text-2xl font-black tracking-[0.25em] text-slate-900 md:text-3xl">請求書</h2>
         </div>
 
@@ -842,8 +843,8 @@ function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer
               <p className="inline-block border-b border-slate-400 pb-1 pr-8 text-lg font-bold">{recipient}</p>
               <p className="mt-3">下記の通りご請求申し上げます。</p>
             </div>
-            <div className="rounded-3xl border border-blue-100 bg-blue-50 p-5 print:border print:bg-white print:text-slate-900">
-              <p className="text-xs font-bold text-blue-600 print:text-slate-600">ご請求金額</p>
+            <div className="rounded-3xl border border-pink-100 bg-pink-50 p-5 print:border print:bg-white print:text-slate-900">
+              <p className="text-xs font-bold text-pink-600 print:text-slate-600">ご請求金額</p>
               <p className="text-4xl font-black text-slate-900">{yen(totals.total)}</p>
             </div>
           </div>
