@@ -479,8 +479,8 @@ function MainSystem({ session, profile, setProfile }) {
       .select("*")
       .eq("user_id", session.user.id)
       .eq("school_id", schoolId)
-      .order("page_no")
-      .order("created_at");
+      .order("page_no", { ascending: true })
+      .order("created_at", { ascending: false });
     setStudents(data || []);
   }
 
@@ -505,7 +505,7 @@ function MainSystem({ session, profile, setProfile }) {
       setStudentMessage(`追加エラー：${error.message}`);
       return;
     }
-    setStudents((prev) => [...prev, data]);
+    setStudents((prev) => [data, ...prev]);
     setStudentMessage("生徒を追加しました。");
   }
 
