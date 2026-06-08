@@ -1,7 +1,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { CalendarDays, FileText, LogOut, Plus, Printer, Save, Trash2, UserPlus, Users, LayoutDashboard, TrendingUp, Wallet, Megaphone, BookOpen, ChevronLeft } from "lucide-react";
+import { CalendarDays, FileText, LogOut, Plus, Printer, Save, Trash2, UserPlus, Users, LayoutDashboard, TrendingUp, Wallet, Megaphone, BookOpen, ChevronLeft, Settings, KeyRound } from "lucide-react";
 import schools from "./schools.json";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
@@ -129,25 +129,7 @@ function DateCalendar({ displayMonth, selectedDates, onToggle, onPrevMonth, onNe
   );
 }
 
-function LoginScreen({ onLoggedIn }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-
-  const login = async () => {
-    setMessage("");
-    if (!supabase) {
-      setMessage("Supabaseの環境変数が未設定です。Vercelに VITE_SUPABASE_URL と VITE_SUPABASE_ANON_KEY を設定してください。");
-      return;
-    }
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      setMessage("ログインできません。メールアドレスまたはパスワードを確認してください。");
-      return;
-    }
-    onLoggedIn();
-  };
-
+function AuthShell({ subtitle, children }) {
   return (
     <div className="min-h-screen bg-slate-50 p-4 flex items-center justify-center">
       <Card className="w-full max-w-md">
@@ -155,22 +137,153 @@ function LoginScreen({ onLoggedIn }) {
         <div className="p-6 space-y-5">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-600">Sowers FC System</p>
-            <h1 className="mt-2 text-2xl font-black">ログイン</h1>
-            <p className="mt-2 text-sm text-slate-600">発行されたIDとパスワードでログインしてください。</p>
+            <h1 className="mt-2 text-2xl font-black">教室管理システム</h1>
+            {subtitle && <p className="mt-2 text-sm text-slate-600">{subtitle}</p>}
           </div>
-          <div className="space-y-2">
-            <FieldLabel>ID・メールアドレス</FieldLabel>
-            <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="例：teacher@example.com" />
-          </div>
-          <div className="space-y-2">
-            <FieldLabel>パスワード</FieldLabel>
-            <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="パスワード" />
-          </div>
-          {message && <div className="rounded-2xl bg-red-50 p-3 text-sm text-red-700">{message}</div>}
-          <Button onClick={login} className="w-full">ログイン</Button>
+          {children}
         </div>
       </Card>
     </div>
+  );
+}
+
+function AuthScreen() {
+  const [tab, setTab] = useState("login"); // login | signup | forgot
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [schoolId, setSchoolId] = useState(schools[0].id);
+  const [message, setMessage] = useState("");
+  const [ok, setOk] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reset = () => { setMessage(""); setOk(""); };
+  const guard = () => {
+    if (!supabase) { setMessage("Supabaseの環境変数が未設定です。Vercelに VITE_SUPABASE_URL と VITE_SUPABASE_ANON_KEY を設定してください。"); return false; }
+    return true;
+  };
+
+  const login = async () => {
+    reset(); if (!guard()) return;
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setBusy(false);
+    if (error) setMessage("ログインできません。メールアドレスまたはパスワードを確認してください。");
+  };
+
+  const signup = async () => {
+    reset(); if (!guard()) return;
+    if (!displayName.trim()) { setMessage("氏名を入力してください。"); return; }
+    if (password.length < 6) { setMessage("パスワードは6文字以上で設定してください。"); return; }
+    setBusy(true);
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName.trim(), school_id: schoolId } } });
+    setBusy(false);
+    if (error) { setMessage(`登録できません：${error.message}`); return; }
+    if (!data.session) setOk("確認メールを送信しました。メール内のリンクから登録を完了してください。");
+    // セッションが返った場合はAppがprofileを自動作成してログイン状態に進みます
+  };
+
+  const forgot = async () => {
+    reset(); if (!guard()) return;
+    if (!email) { setMessage("メールアドレスを入力してください。"); return; }
+    setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    setBusy(false);
+    if (error) setMessage(`送信できません：${error.message}`);
+    else setOk("再設定メールを送信しました。メールのリンクから新しいパスワードを設定してください。");
+  };
+
+  const Tabs = (
+    <div className="grid grid-cols-2 gap-2">
+      <Button variant={tab === "login" ? "primary" : "outline"} onClick={() => { setTab("login"); reset(); }} className="w-full">ログイン</Button>
+      <Button variant={tab === "signup" ? "primary" : "outline"} onClick={() => { setTab("signup"); reset(); }} className="w-full">新規登録</Button>
+    </div>
+  );
+  const Alerts = (
+    <>
+      {message && <div className="rounded-2xl bg-red-50 p-3 text-sm text-red-700">{message}</div>}
+      {ok && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{ok}</div>}
+    </>
+  );
+
+  if (tab === "forgot") {
+    return (
+      <AuthShell subtitle="登録済みのメールアドレスに再設定リンクを送ります。">
+        <div className="space-y-2">
+          <FieldLabel>メールアドレス</FieldLabel>
+          <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="例：teacher@example.com" />
+        </div>
+        {Alerts}
+        <Button onClick={forgot} disabled={busy} className="w-full">再設定メールを送信</Button>
+        <button type="button" onClick={() => { setTab("login"); reset(); }} className="w-full text-sm font-bold text-emerald-700 hover:text-emerald-800">ログインに戻る</button>
+      </AuthShell>
+    );
+  }
+
+  return (
+    <AuthShell subtitle={tab === "login" ? "メールアドレスとパスワードでログインしてください。" : "先生ご自身の情報を入力して登録してください。"}>
+      {Tabs}
+      {tab === "signup" && (
+        <>
+          <div className="space-y-2">
+            <FieldLabel>氏名（フルネーム）</FieldLabel>
+            <TextInput value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="例：沢野 太郎" />
+          </div>
+          <div className="space-y-2">
+            <FieldLabel>担当教室</FieldLabel>
+            <SelectInput value={schoolId} onChange={setSchoolId}>
+              {schools.map((item) => <option key={item.id} value={item.id}>{item.area}｜{item.name}</option>)}
+            </SelectInput>
+          </div>
+        </>
+      )}
+      <div className="space-y-2">
+        <FieldLabel>メールアドレス</FieldLabel>
+        <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="例：teacher@example.com" />
+      </div>
+      <div className="space-y-2">
+        <FieldLabel>パスワード{tab === "signup" && "（6文字以上）"}</FieldLabel>
+        <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="パスワード" />
+      </div>
+      {Alerts}
+      {tab === "login" ? (
+        <>
+          <Button onClick={login} disabled={busy} className="w-full">ログイン</Button>
+          <button type="button" onClick={() => { setTab("forgot"); reset(); }} className="w-full text-sm font-bold text-slate-500 hover:text-emerald-700">パスワードをお忘れですか？</button>
+        </>
+      ) : (
+        <Button onClick={signup} disabled={busy} className="w-full">この内容で登録する</Button>
+      )}
+    </AuthShell>
+  );
+}
+
+function PasswordRecoveryScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const update = async () => {
+    setMessage("");
+    if (!supabase) return;
+    if (password.length < 6) { setMessage("パスワードは6文字以上で設定してください。"); return; }
+    setBusy(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+    if (error) { setMessage(`更新できません：${error.message}`); return; }
+    setMessage("パスワードを更新しました。ログインします...");
+    setTimeout(onDone, 1200);
+  };
+
+  return (
+    <AuthShell subtitle="新しいパスワードを設定してください。">
+      <div className="space-y-2">
+        <FieldLabel>新しいパスワード（6文字以上）</FieldLabel>
+        <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="新しいパスワード" />
+      </div>
+      {message && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</div>}
+      <Button onClick={update} disabled={busy} className="w-full">パスワードを更新</Button>
+    </AuthShell>
   );
 }
 
@@ -178,6 +291,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [appReady, setAppReady] = useState(false);
+  const [recovery, setRecovery] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -188,29 +302,40 @@ export default function App() {
       setSession(data.session || null);
       setAppReady(true);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(nextSession);
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    async function loadProfile() {
+    async function ensureProfile() {
       if (!session?.user || !supabase) return;
       const { data } = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
-      setProfile(data || { id: session.user.id, display_name: session.user.email, school_id: schools[0].id, role: "teacher" });
+      if (data) { setProfile(data); return; }
+      const meta = session.user.user_metadata || {};
+      const newProfile = {
+        id: session.user.id,
+        display_name: meta.display_name || session.user.email,
+        school_id: meta.school_id || schools[0].id,
+        role: "teacher",
+      };
+      const { data: inserted } = await supabase.from("profiles").insert(newProfile).select().maybeSingle();
+      setProfile(inserted || newProfile);
     }
-    loadProfile();
+    ensureProfile();
   }, [session]);
 
   if (!appReady) return <div className="p-6">読み込み中...</div>;
-  if (!session) return <LoginScreen onLoggedIn={() => {}} />;
+  if (recovery) return <PasswordRecoveryScreen onDone={() => setRecovery(false)} />;
+  if (!session) return <AuthScreen />;
   if (!profile) return <div className="p-6">プロフィール読み込み中...</div>;
 
-  return <MainSystem session={session} profile={profile} />;
+  return <MainSystem session={session} profile={profile} setProfile={setProfile} />;
 }
 
-function MainSystem({ session, profile }) {
+function MainSystem({ session, profile, setProfile }) {
   const allowedSchool = getSchoolById(profile.school_id);
   const [mode, setMode] = useState("dashboard");
   const [schoolId, setSchoolId] = useState(allowedSchool.id);
@@ -492,6 +617,18 @@ function MainSystem({ session, profile }) {
         totals={totals}
         students={students}
         onBack={() => setMode("dashboard")}
+      />
+    );
+  }
+
+  if (mode === "account") {
+    return (
+      <AccountPanel
+        session={session}
+        profile={profile}
+        setProfile={setProfile}
+        onBack={() => setMode("dashboard")}
+        logout={logout}
       />
     );
   }
@@ -937,6 +1074,85 @@ const THEME = {
   pink: { card: "border-pink-200 hover:border-pink-400 hover:bg-pink-50", chip: "bg-pink-100 text-pink-700", bar: "bg-pink-500" },
 };
 
+function AccountPanel({ session, profile, setProfile, onBack, logout }) {
+  const [displayName, setDisplayName] = useState(profile.display_name || "");
+  const [schoolId, setSchoolId] = useState(profile.school_id || schools[0].id);
+  const [newPassword, setNewPassword] = useState("");
+  const [profileMsg, setProfileMsg] = useState("");
+  const [pwMsg, setPwMsg] = useState("");
+
+  const saveProfile = async () => {
+    setProfileMsg("");
+    if (!supabase) return;
+    if (!displayName.trim()) { setProfileMsg("氏名を入力してください。"); return; }
+    const updates = { display_name: displayName.trim(), school_id: schoolId, updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("profiles").update(updates).eq("id", session.user.id);
+    if (error) { setProfileMsg(`保存エラー：${error.message}`); return; }
+    setProfile((prev) => ({ ...prev, ...updates }));
+    setProfileMsg("プロフィールを更新しました。");
+  };
+
+  const changePassword = async () => {
+    setPwMsg("");
+    if (!supabase) return;
+    if (newPassword.length < 6) { setPwMsg("パスワードは6文字以上で設定してください。"); return; }
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) { setPwMsg(`変更エラー：${error.message}`); return; }
+    setNewPassword("");
+    setPwMsg("パスワードを変更しました。");
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-4 md:p-8">
+      <div className="mx-auto max-w-2xl space-y-5">
+        <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-sm font-bold text-emerald-700 hover:text-emerald-800"><ChevronLeft className="h-4 w-4" />ダッシュボードに戻る</button>
+
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="h-2 w-full bg-gradient-to-r from-emerald-500 via-orange-400 to-pink-500" />
+          <div className="flex items-center gap-3 p-5">
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700"><Settings className="h-6 w-6" /></span>
+            <div>
+              <h1 className="text-2xl font-black">アカウント設定</h1>
+              <p className="text-sm text-slate-600">{session.user.email}</p>
+            </div>
+          </div>
+        </div>
+
+        <Card><div className="space-y-4 p-5">
+          <div className="h-1.5 w-20 rounded-full bg-emerald-500" />
+          <h2 className="text-lg font-black">プロフィール</h2>
+          <div className="space-y-2">
+            <FieldLabel>氏名（フルネーム）</FieldLabel>
+            <TextInput value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="例：沢野 太郎" />
+          </div>
+          <div className="space-y-2">
+            <FieldLabel>担当教室</FieldLabel>
+            <SelectInput value={schoolId} onChange={setSchoolId}>
+              {schools.map((item) => <option key={item.id} value={item.id}>{item.area}｜{item.name}</option>)}
+            </SelectInput>
+          </div>
+          {profileMsg && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{profileMsg}</div>}
+          <Button onClick={saveProfile} className="w-full"><Save className="mr-1 h-4 w-4" />保存</Button>
+        </div></Card>
+
+        <Card><div className="space-y-4 p-5">
+          <div className="h-1.5 w-20 rounded-full bg-pink-500" />
+          <h2 className="text-lg font-black">パスワード変更</h2>
+          <div className="space-y-2">
+            <FieldLabel>新しいパスワード（6文字以上）</FieldLabel>
+            <TextInput type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="新しいパスワード" />
+          </div>
+          {pwMsg && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{pwMsg}</div>}
+          <Button onClick={changePassword} className="w-full"><KeyRound className="mr-1 h-4 w-4" />パスワードを変更</Button>
+          <p className="text-xs text-slate-500" style={{ wordBreak: "auto-phrase" }}>メールアドレス（ID）の変更が必要な場合は管理者にご連絡ください。</p>
+        </div></Card>
+
+        <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
+      </div>
+    </div>
+  );
+}
+
 function DashboardHome({ profile, session, school, schoolId, setSchoolId, targetMonth, studentStats, totals, onSelect, logout }) {
   return (
     <div className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-4 md:p-8">
@@ -954,7 +1170,10 @@ function DashboardHome({ profile, session, school, schoolId, setSchoolId, target
                 </SelectInput>
               </div>
             </div>
-            <Button variant="ghost" onClick={logout} className="w-full sm:w-auto"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+              <Button variant="outline" onClick={() => onSelect("account")} className="w-full sm:w-auto"><Settings className="mr-1 h-4 w-4" />アカウント設定</Button>
+              <Button variant="ghost" onClick={logout} className="w-full sm:w-auto"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
+            </div>
           </div>
         </div>
 
