@@ -385,7 +385,7 @@ function MainSystem({ session, profile, setProfile }) {
     return { activeCount: active.length, suspendedCount: suspended.length, withdrawnCount: withdrawn.length, monthlyRevenue };
   }, [students]);
 
-  const visibleStudents = students.filter((student) => student.page_no === rosterPage);
+  const visibleStudents = students;
 
   useEffect(() => {
     loadInvoice();
@@ -889,19 +889,12 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
         {message && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</div>}
 
         {studentStats && (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-3 gap-2">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs font-bold text-emerald-700">在籍</p><p className="text-xl font-black text-emerald-800">{studentStats.activeCount}名</p></div>
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-bold text-amber-700">休会</p><p className="text-xl font-black text-amber-800">{studentStats.suspendedCount}名</p></div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><p className="text-xs font-bold text-slate-600">退会</p><p className="text-xl font-black text-slate-700">{studentStats.withdrawnCount}名</p></div>
-            <div className="rounded-2xl border border-pink-200 bg-pink-50 p-3"><p className="text-xs font-bold text-pink-700">月謝合計</p><p className="text-xl font-black text-pink-800">{yen(studentStats.monthlyRevenue)}</p></div>
           </div>
         )}
-
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
-          {Array.from({ length: 9 }, (_, i) => i + 1).map((page) => (
-            <button key={page} type="button" onClick={() => setRosterPage(page)} className={`rounded-2xl border px-3 py-2 text-sm font-bold ${rosterPage === page ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>ページ{page}</button>
-          ))}
-        </div>
 
         <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
           <p className="mb-2 text-sm font-bold">クラス人数</p>
@@ -915,25 +908,24 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
         <div>
           <p className="mb-2 text-sm font-bold">名簿一覧（全{students.length}名）</p>
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[1.5fr_0.7fr_0.7fr_0.9fr] gap-1 bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
-              <span>氏名</span><span>クラス</span><span>状態</span><span className="text-right">月謝</span>
+            <div className="grid grid-cols-[1.5fr_0.7fr_0.7fr] gap-1 bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
+              <span>氏名</span><span>クラス</span><span>状態</span>
             </div>
             {students.length ? students.map((s, i) => {
               const st = s.status || "active";
               const stColor = st === "active" ? "text-emerald-700" : st === "suspended" ? "text-amber-700" : "text-slate-400";
               return (
-                <div key={s.id} className={`grid grid-cols-[1.5fr_0.7fr_0.7fr_0.9fr] items-center gap-1 px-3 py-2 text-sm ${i % 2 ? "bg-white" : "bg-slate-50/60"}`}>
+                <div key={s.id} className={`grid grid-cols-[1.5fr_0.7fr_0.7fr] items-center gap-1 px-3 py-2 text-sm ${i % 2 ? "bg-white" : "bg-slate-50/60"}`}>
                   <span className="truncate font-bold">{s.full_name || "（未入力）"}</span>
                   <span className="truncate text-slate-600">{s.class_name || "-"}</span>
                   <span className={`font-bold ${stColor}`}>{studentStatusLabel(st)}</span>
-                  <span className="text-right text-slate-700">{yen(s.monthly_fee)}</span>
                 </div>
               );
             }) : <div className="px-3 py-4 text-sm text-slate-500">生徒が登録されていません。</div>}
           </div>
         </div>
 
-        <p className="text-sm font-bold text-slate-500">名簿の編集（ページ{rosterPage}）</p>
+        <p className="text-sm font-bold text-slate-500">名簿の編集</p>
         <div className="space-y-3">
           {visibleStudents.map((student) => {
             const status = student.status || "active";
@@ -945,14 +937,11 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
                 <div className="space-y-1"><FieldLabel>入会月</FieldLabel><TextInput type="month" value={student.join_month || ""} onChange={(e) => updateStudent(student.id, "join_month", e.target.value)} /></div>
                 <div className="space-y-1"><FieldLabel>継続期間</FieldLabel><TextInput value={monthsBetween(student.join_month, targetMonth)} readOnly className="bg-white/70" /></div>
                 <div className="space-y-1"><FieldLabel>クラス</FieldLabel><TextInput value={student.class_name || ""} onChange={(e) => updateStudent(student.id, "class_name", e.target.value)} placeholder={school.classes[0]?.name || "A"} /></div>
-                <div className="space-y-1"><FieldLabel>ページ</FieldLabel><TextInput type="number" min="1" max="9" value={student.page_no || 1} onChange={(e) => updateStudent(student.id, "page_no", Math.min(9, Math.max(1, safeNumber(e.target.value))))} /></div>
                 <div className="space-y-1"><FieldLabel>在籍状態</FieldLabel>
                   <SelectInput value={status} onChange={(value) => updateStudent(student.id, "status", value)}>
                     {STUDENT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </SelectInput>
                 </div>
-                <div className="space-y-1"><FieldLabel>入会金</FieldLabel><TextInput type="number" step="100" value={student.enrollment_fee ?? 0} onChange={(e) => updateStudent(student.id, "enrollment_fee", safeNumber(e.target.value))} placeholder="例：3000" /></div>
-                <div className="space-y-1"><FieldLabel>月謝</FieldLabel><TextInput type="number" step="100" value={student.monthly_fee ?? 0} onChange={(e) => updateStudent(student.id, "monthly_fee", safeNumber(e.target.value))} placeholder="例：6000" /></div>
                 <div className="space-y-1 md:col-span-6"><FieldLabel>メモ</FieldLabel><TextInput value={student.memo || ""} onChange={(e) => updateStudent(student.id, "memo", e.target.value)} placeholder="任意" /></div>
               </div>
               <Button variant="ghost" onClick={() => deleteStudent(student.id)} className="w-full"><Trash2 className="mr-1 h-4 w-4" />この生徒を削除</Button>
@@ -1064,7 +1053,7 @@ const DASHBOARD_MENU = [
   { mode: "invoice", label: "請求書作成", desc: "出勤・経費を入力して請求書を発行", Icon: FileText, theme: "emerald" },
   { mode: "students", label: "生徒名簿", desc: "氏名・入会月・クラス・在籍状態を管理", Icon: Users, theme: "orange" },
   { mode: "trend", label: "生徒数推移", desc: "在籍・休会・退会とクラス別人数", Icon: TrendingUp, theme: "pink" },
-  { mode: "sales", label: "売上管理", desc: "月謝合計・今月の請求額を把握", Icon: Wallet, theme: "emerald" },
+  { mode: "sales", label: "売上管理", desc: "今月の請求額・出勤小計を把握", Icon: Wallet, theme: "emerald" },
   { mode: "news", label: "お知らせ", desc: "先生・保護者への連絡（準備中）", Icon: Megaphone, theme: "orange" },
   { mode: "manual", label: "マニュアル", desc: "操作手順・運用ルール（準備中）", Icon: BookOpen, theme: "pink" },
 ];
@@ -1177,9 +1166,8 @@ function DashboardHome({ profile, session, school, schoolId, setSchoolId, target
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4"><p className="text-xs font-bold text-emerald-700">在籍生徒数</p><p className="text-2xl font-black text-emerald-800">{studentStats.activeCount}名</p></div>
-          <div className="rounded-3xl border border-pink-200 bg-pink-50 p-4"><p className="text-xs font-bold text-pink-700">月謝合計</p><p className="text-2xl font-black text-pink-800">{yen(studentStats.monthlyRevenue)}</p></div>
           <div className="rounded-3xl border border-orange-200 bg-orange-50 p-4"><p className="text-xs font-bold text-orange-700">{targetMonth} 請求額</p><p className="text-2xl font-black text-orange-800">{yen(totals.total)}</p></div>
         </div>
 
@@ -1249,7 +1237,6 @@ function PlaceholderPage({ mode, school, studentStats, totals, students, onBack 
 
         {mode === "sales" && (
           <Card><div className="space-y-3 p-5">
-            <div className="flex items-center justify-between rounded-2xl border border-pink-200 bg-pink-50 px-4 py-3"><span className="font-bold">月謝合計（在籍生徒）</span><span className="text-xl font-black text-pink-800">{yen(studentStats.monthlyRevenue)}</span></div>
             <div className="flex items-center justify-between rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3"><span className="font-bold">今月の請求額</span><span className="text-xl font-black text-orange-800">{yen(totals.total)}</span></div>
             <div className="flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3"><span className="font-bold">出勤小計</span><span className="text-xl font-black text-emerald-800">{yen(totals.workTotal)}</span></div>
             <p className="text-xs text-slate-500">※ 月次の売上推移グラフは今後のアップデートで追加予定です。</p>
