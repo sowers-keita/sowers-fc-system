@@ -58,6 +58,18 @@ create policy "read own profile"
 on profiles for select
 using (auth.uid() = id);
 
+-- アプリ内の新規登録・プロフィール編集のために自分の行を作成/更新できるようにする
+drop policy if exists "insert own profile" on profiles;
+create policy "insert own profile"
+on profiles for insert
+with check (auth.uid() = id);
+
+drop policy if exists "update own profile" on profiles;
+create policy "update own profile"
+on profiles for update
+using (auth.uid() = id)
+with check (auth.uid() = id);
+
 drop policy if exists "insert own invoices" on invoice_months;
 create policy "insert own invoices"
 on invoice_months for insert
