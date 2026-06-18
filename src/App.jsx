@@ -902,8 +902,8 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
               const stColor = st === "active" ? "text-emerald-700" : st === "suspended" ? "text-amber-700" : "text-slate-400";
               return (
                 <div key={s.id} className={`grid grid-cols-[1.5fr_0.7fr_0.7fr] items-center gap-1 px-3 py-2 text-sm ${i % 2 ? "bg-white" : "bg-slate-50/60"}`}>
-                  <span className="truncate font-bold">{s.full_name || "（未入力）"}</span>
-                  <span className="truncate text-slate-600">{s.class_name || "-"}</span>
+                  <span className="font-bold break-words" style={{ wordBreak: "auto-phrase" }}>{s.full_name || "（未入力）"}</span>
+                  <span className="break-words text-slate-600">{s.class_name || "-"}</span>
                   <span className={`font-bold ${stColor}`}>{studentStatusLabel(st)}</span>
                 </div>
               );
