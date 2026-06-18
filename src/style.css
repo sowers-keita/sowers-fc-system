@@ -10,6 +10,11 @@
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  /* 「印刷」ボタン時も、行や合計欄の途中でページが切れないようにする */
+  .pdf-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
 
 * {

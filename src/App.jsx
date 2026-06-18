@@ -561,34 +561,8 @@ function MainSystem({ session, profile, setProfile }) {
   const printInvoice = () => window.print();
 
   async function downloadPdf() {
-    const el = document.getElementById("invoice-pdf-area");
-    if (!el) return;
-    setSaveMessage("PDFを作成中...");
-    try {
-      const [html2canvasMod, jsPDFmod] = await Promise.all([import("html2canvas"), import("jspdf")]);
-      const html2canvas = html2canvasMod.default || html2canvasMod;
-      const jsPDF = jsPDFmod.jsPDF || jsPDFmod.default;
-      const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-      const pageH = pdf.internal.pageSize.getHeight();
-      const imgW = pdf.internal.pageSize.getWidth();
-      const imgH = (canvas.height * imgW) / canvas.width;
-      let heightLeft = imgH;
-      let position = 0;
-      pdf.addImage(imgData, "JPEG", 0, position, imgW, imgH);
-      heightLeft -= pageH;
-      while (heightLeft > 0) {
-        position -= pageH;
-        pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, position, imgW, imgH);
-        heightLeft -= pageH;
-      }
-      pdf.save(`${invoiceNo || "invoice"}.pdf`);
-      setSaveMessage("PDFを保存しました。");
-    } catch (e) {
-      setSaveMessage(`PDF作成に失敗しました：${e.message}。「印刷」ボタンからもお試しください。`);
-    }
+    // 継ぎ目のない「1枚の長いページ」として保存する
+    await exportElementAsLongPdf("invoice-pdf-area", `${invoiceNo || "invoice"}.pdf`, setSaveMessage);
   }
 
   if (mode === "dashboard") {
@@ -874,6 +848,7 @@ function MainSystem({ session, profile, setProfile }) {
 }
 
 function StudentRoster({ school, targetMonth, students, visibleStudents, rosterPage, setRosterPage, addStudent, updateStudent, deleteStudent, classCounts, studentStats, message }) {
+  const [pdfMsg, setPdfMsg] = useState("");
   return (
     <Card>
       <div className="space-y-4 p-4 md:p-5">
@@ -883,10 +858,21 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
             <h2 className="mt-3 text-lg font-black">生徒名簿</h2>
             <p className="mt-1 text-xs text-slate-500">氏名・入会月・継続期間・クラスを管理できます。</p>
           </div>
-          <Button onClick={addStudent} className="w-full sm:w-auto"><Plus className="mr-1 h-4 w-4" />生徒を追加</Button>
+          <div className="grid grid-cols-1 gap-2 sm:flex">
+            <Button variant="outline" onClick={() => exportElementAsLongPdf("roster-pdf-area", `${school.area}｜${school.name}_生徒名簿.pdf`, setPdfMsg)} className="w-full sm:w-auto"><FileText className="mr-1 h-4 w-4" />PDF保存</Button>
+            <Button onClick={addStudent} className="w-full sm:w-auto"><Plus className="mr-1 h-4 w-4" />生徒を追加</Button>
+          </div>
         </div>
 
         {message && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</div>}
+        {pdfMsg && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{pdfMsg}</div>}
+
+        <div id="roster-pdf-area" className="space-y-4 bg-white p-4">
+          <div className="border-b-2 border-orange-500 pb-2">
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-orange-600">Sowers FC System</p>
+            <h3 className="text-lg font-black text-slate-900">{school.area}｜{school.name}　生徒名簿</h3>
+            <p className="text-xs text-slate-500">対象月：{targetMonth}</p>
+          </div>
 
         {studentStats && (
           <div className="grid grid-cols-3 gap-2">
@@ -924,6 +910,7 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
             }) : <div className="px-3 py-4 text-sm text-slate-500">生徒が登録されていません。</div>}
           </div>
         </div>
+        </div>
 
         <p className="text-sm font-bold text-slate-500">名簿の編集</p>
         <div className="space-y-3">
@@ -954,16 +941,45 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
   );
 }
 
+// 指定要素を「継ぎ目のない1枚の長いページ」としてPDF保存する共通処理
+async function exportElementAsLongPdf(elementId, filename, onStatus) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  if (onStatus) onStatus("PDFを作成中...");
+  try {
+    const [html2canvasMod, jsPDFmod] = await Promise.all([import("html2canvas"), import("jspdf")]);
+    const html2canvas = html2canvasMod.default || html2canvasMod;
+    const jsPDF = jsPDFmod.jsPDF || jsPDFmod.default;
+
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+    const imgData = canvas.toDataURL("image/jpeg", 0.95);
+
+    const pageW = 210;                                  // A4と同じ幅(mm)
+    const margin = 8;                                   // 左右・上下の余白(mm)
+    const contentW = pageW - margin * 2;
+    const imgH = (canvas.height * contentW) / canvas.width;
+    const pageH = imgH + margin * 2;                    // 中身に合わせて縦に伸ばす
+
+    // 中身全体が収まる縦長1ページのPDFを作る（途中で改ページしない）
+    const pdf = new jsPDF({ unit: "mm", format: [pageW, pageH], orientation: "portrait" });
+    pdf.addImage(imgData, "JPEG", margin, margin, contentW, imgH);
+    pdf.save(filename);
+    if (onStatus) onStatus("PDFを保存しました。");
+  } catch (e) {
+    if (onStatus) onStatus(`PDF作成に失敗しました：${e.message}`);
+  }
+}
+
 function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer, school, people, expenses, totals, bankInfo, notes }) {
   return (
     <Card className="print:rounded-none print:shadow-none">
       <div id="invoice-pdf-area" className="bg-white p-4 md:p-8 print:p-0">
-        <div className="mb-6 border-b-2 border-emerald-600 pb-4">
+        <div className="pdf-block mb-6 border-b-2 border-emerald-600 pb-4">
           <p className="text-center text-xs font-bold uppercase tracking-[0.3em] text-emerald-600">Sowers Franchise System</p>
           <h2 className="mt-1 text-center text-2xl font-black tracking-[0.25em] text-slate-900 md:text-3xl">請求書</h2>
         </div>
 
-        <div className="mb-6 grid grid-cols-1 gap-5 text-sm md:grid-cols-2">
+        <div className="pdf-block mb-6 grid grid-cols-1 gap-5 text-sm md:grid-cols-2">
           <div className="space-y-3">
             <div>
               <p className="inline-block border-b border-slate-400 pb-1 pr-8 text-lg font-bold">{recipient}</p>
@@ -982,17 +998,17 @@ function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer
           </div>
         </div>
 
-        <div className="mb-5 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
+        <div className="pdf-block mb-5 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
           <p><span className="text-slate-500">教室名：</span>{school.name}</p>
           <p><span className="text-slate-500">エリア：</span>{school.area}</p>
           <p><span className="text-slate-500">曜日：</span>{school.day}</p>
           <p><span className="text-slate-500">会場：</span>{school.venue}</p>
         </div>
 
-        <p className="mb-2 text-sm font-bold">人物別出勤情報</p>
+        <p className="pdf-block mb-2 text-sm font-bold" data-pdf-keep="next">人物別出勤情報</p>
         <div className="space-y-3">
           {people.map((person, personIndex) => (
-            <div key={person.id} className="rounded-2xl border border-slate-200 p-3">
+            <div key={person.id} className="pdf-block rounded-2xl border border-slate-200 p-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                 <p className="font-bold">{person.name || `人物${personIndex + 1}`}</p>
                 <p className="text-sm font-black text-emerald-700">{yen(personSubtotal(person))}</p>
@@ -1017,12 +1033,12 @@ function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer
           ))}
         </div>
 
-        <p className="mb-2 mt-4 text-sm font-bold">経費</p>
+        <p className="pdf-block mb-2 mt-4 text-sm font-bold" data-pdf-keep="next">経費</p>
         <div className="space-y-2">
           {expenses.map((expense) => {
             const expenseSubtotal = safeNumber(expense.quantity) * safeNumber(expense.amount);
             return (
-              <div key={expense.id} className="rounded-xl border border-slate-200 p-2.5 text-xs">
+              <div key={expense.id} className="pdf-block rounded-xl border border-slate-200 p-2.5 text-xs">
                 <div className="flex items-start justify-between gap-2">
                   <span className="font-bold leading-snug" style={{ wordBreak: "auto-phrase" }}>{expense.item || "未入力"}</span>
                   <span className="shrink-0 font-bold">{yen(expenseSubtotal)}</span>
@@ -1033,14 +1049,14 @@ function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer
           })}
         </div>
 
-        <div className="mb-6 mt-4 space-y-1.5 rounded-2xl bg-slate-50 p-4 text-sm print:bg-white print:border print:border-slate-300">
+        <div className="pdf-block mb-6 mt-4 space-y-1.5 rounded-2xl bg-slate-50 p-4 text-sm print:bg-white print:border print:border-slate-300">
           <div className="flex justify-between"><span className="text-slate-500">合計出勤日数</span><span className="font-bold">{totals.totalWorkDays}日</span></div>
           <div className="flex justify-between"><span className="text-slate-500">出勤小計</span><span className="font-bold">{yen(totals.workTotal)}</span></div>
           <div className="flex justify-between"><span className="text-slate-500">経費小計</span><span className="font-bold">{yen(totals.expenseTotal)}</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-slate-300 pt-2"><span className="text-base font-black">合計金額</span><span className="text-lg font-black text-emerald-700">{yen(totals.total)}</span></div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 text-sm">
+        <div className="pdf-block grid grid-cols-1 gap-4 text-sm">
           <div><p className="mb-1 font-bold">振込先</p><div className="min-h-16 whitespace-pre-wrap rounded-lg border p-3">{bankInfo || "未入力"}</div></div>
           <div><p className="mb-1 font-bold">備考</p><div className="min-h-12 whitespace-pre-wrap rounded-lg border p-3">{notes || "-"}</div></div>
         </div>
