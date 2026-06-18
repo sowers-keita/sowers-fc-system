@@ -849,6 +849,16 @@ function MainSystem({ session, profile, setProfile }) {
 
 function StudentRoster({ school, targetMonth, students, visibleStudents, rosterPage, setRosterPage, addStudent, updateStudent, deleteStudent, classCounts, studentStats, message }) {
   const [pdfMsg, setPdfMsg] = useState("");
+  // 並び順：クラス順（school.classes の順）→ 同クラス内は入会が古い順
+  const classOrder = (school.classes || []).map((c) => c.name);
+  const rankClass = (n) => { const i = classOrder.indexOf(n); return i < 0 ? 999 : i; };
+  const sortedStudents = [...students].sort((a, b) => {
+    const ca = rankClass(a.class_name), cb = rankClass(b.class_name);
+    if (ca !== cb) return ca - cb;
+    const cn = (a.class_name || "").localeCompare(b.class_name || "");
+    if (cn !== 0) return cn;
+    return (a.join_month || "9999-99").localeCompare(b.join_month || "9999-99");
+  });
   return (
     <Card>
       <div className="space-y-4 p-4 md:p-5">
@@ -894,16 +904,18 @@ function StudentRoster({ school, targetMonth, students, visibleStudents, rosterP
         <div>
           <p className="mb-2 text-sm font-bold">名簿一覧（全{students.length}名）</p>
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[1.5fr_0.7fr_0.7fr] gap-1 bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
-              <span>氏名</span><span>クラス</span><span>状態</span>
+            <div className="grid grid-cols-[1.3fr_0.6fr_0.8fr_0.9fr_0.6fr] gap-1 bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
+              <span>氏名</span><span>クラス</span><span>入会月</span><span>継続期間</span><span>状態</span>
             </div>
-            {students.length ? students.map((s, i) => {
+            {sortedStudents.length ? sortedStudents.map((s, i) => {
               const st = s.status || "active";
               const stColor = st === "active" ? "text-emerald-700" : st === "suspended" ? "text-amber-700" : "text-slate-400";
               return (
-                <div key={s.id} className={`grid grid-cols-[1.5fr_0.7fr_0.7fr] items-center gap-1 px-3 py-2 text-sm ${i % 2 ? "bg-white" : "bg-slate-50/60"}`}>
+                <div key={s.id} className={`grid grid-cols-[1.3fr_0.6fr_0.8fr_0.9fr_0.6fr] items-center gap-1 px-3 py-2 text-sm ${i % 2 ? "bg-white" : "bg-slate-50/60"}`}>
                   <span className="font-bold break-words" style={{ wordBreak: "auto-phrase" }}>{s.full_name || "（未入力）"}</span>
                   <span className="break-words text-slate-600">{s.class_name || "-"}</span>
+                  <span className="text-slate-600">{s.join_month || "-"}</span>
+                  <span className="text-slate-600">{monthsBetween(s.join_month, targetMonth) || "-"}</span>
                   <span className={`font-bold ${stColor}`}>{studentStatusLabel(st)}</span>
                 </div>
               );
