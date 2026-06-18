@@ -354,6 +354,7 @@ function MainSystem({ session, profile, setProfile }) {
   const [calendarMonth, setCalendarMonth] = useState(monthString());
   const [expenses, setExpenses] = useState([makeExpenseRow()]);
   const [saveMessage, setSaveMessage] = useState("");
+  const [savedMonths, setSavedMonths] = useState([]);
 
   const [students, setStudents] = useState([]);
   const [rosterPage, setRosterPage] = useState(1);
@@ -390,7 +391,20 @@ function MainSystem({ session, profile, setProfile }) {
   useEffect(() => {
     loadInvoice();
     loadStudents();
+    loadSavedMonths();
   }, [schoolId, targetMonth]);
+
+  // この教室で保存済みの月の一覧（後から見返すため）
+  async function loadSavedMonths() {
+    if (!supabase) return;
+    const { data } = await supabase
+      .from("invoice_months")
+      .select("target_month, updated_at")
+      .eq("user_id", session.user.id)
+      .eq("school_id", schoolId)
+      .order("target_month", { ascending: false });
+    setSavedMonths(data || []);
+  }
 
   async function loadInvoice() {
     if (!supabase) return;
@@ -437,7 +451,8 @@ function MainSystem({ session, profile, setProfile }) {
       updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from("invoice_months").upsert(payload, { onConflict: "user_id,school_id,target_month" });
-    setSaveMessage(error ? `保存エラー：${error.message}` : "保存しました。");
+    setSaveMessage(error ? `保存エラー：${error.message}` : `${targetMonth} 分を保存しました（同じ月は上書きされます）。`);
+    if (!error) loadSavedMonths();
   }
 
   async function copyPreviousMonth() {
@@ -637,6 +652,21 @@ function MainSystem({ session, profile, setProfile }) {
 
           {mode === "invoice" ? (
             <>
+              <Card>
+                <div className="space-y-3 p-4 md:p-5">
+                  <div className="h-1.5 w-20 rounded-full bg-emerald-500" />
+                  <h2 className="text-lg font-black">保存済みの月</h2>
+                  <p className="text-xs text-slate-500">月をタップすると、その月の保存内容を表示します。請求書は月ごとに1件で、同じ月に保存すると上書きされます。</p>
+                  {savedMonths.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {savedMonths.map((m) => (
+                        <button key={m.target_month} type="button" onClick={() => { setTargetMonth(m.target_month); setCalendarMonth(m.target_month); }} className={`rounded-full border px-3 py-1.5 text-sm font-bold transition ${m.target_month === targetMonth ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"}`}>{m.target_month}</button>
+                      ))}
+                    </div>
+                  ) : <p className="text-sm text-slate-500">まだ保存された月がありません。下で内容を入力し「保存」すると、ここに月が並びます。</p>}
+                </div>
+              </Card>
+
               <Card>
                 <div className="space-y-4 p-4 md:p-5">
                   <div className="h-1.5 w-20 rounded-full bg-pink-500" />
