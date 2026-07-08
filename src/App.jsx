@@ -80,6 +80,14 @@ function personSubtotal(person) {
 function personWorkDays(person) {
   return person.works.reduce((sum, work) => sum + work.dates.length, 0);
 }
+function calcTotals(people, expenses) {
+  const list = Array.isArray(people) ? people : [];
+  const exps = Array.isArray(expenses) ? expenses : [];
+  const workTotal = list.reduce((sum, person) => sum + personSubtotal(person), 0);
+  const totalWorkDays = list.reduce((sum, person) => sum + personWorkDays(person), 0);
+  const expenseTotal = exps.reduce((sum, expense) => sum + safeNumber(expense.quantity) * safeNumber(expense.amount), 0);
+  return { workTotal, totalWorkDays, expenseTotal, total: workTotal + expenseTotal };
+}
 
 function FieldLabel({ children }) { return <label className="text-sm font-bold text-slate-700">{children}</label>; }
 function TextInput(props) {
@@ -332,6 +340,7 @@ export default function App() {
   if (!session) return <AuthScreen />;
   if (!profile) return <div className="p-6">プロフィール読み込み中...</div>;
 
+  if (profile.role === "admin") return <AdminSystem session={session} profile={profile} />;
   return <MainSystem session={session} profile={profile} setProfile={setProfile} />;
 }
 
@@ -355,6 +364,8 @@ function MainSystem({ session, profile, setProfile }) {
   const [expenses, setExpenses] = useState([makeExpenseRow()]);
   const [saveMessage, setSaveMessage] = useState("");
   const [savedMonths, setSavedMonths] = useState([]);
+  const [status, setStatus] = useState("draft");
+  const [submitting, setSubmitting] = useState(false);
 
   const [students, setStudents] = useState([]);
   const [rosterPage, setRosterPage] = useState(1);
@@ -425,12 +436,14 @@ function MainSystem({ session, profile, setProfile }) {
       setPeople(Array.isArray(data.people) && data.people.length ? data.people : [makePerson(school.defaultRate, "")]);
       setExpenses(Array.isArray(data.expenses) && data.expenses.length ? data.expenses : [makeExpenseRow()]);
       setActivePersonId(null);
+      setStatus(data.status === "submitted" ? "submitted" : "draft");
     } else {
       const defaultClassName = school.classes[0]?.name || "A";
       setPeople([makePerson(school.defaultRate, "")]);
       setPeople([{ ...makePerson(school.defaultRate, ""), works: [makeWorkRow(school.defaultRate, `${defaultClassName}クラス メイン`)] }]);
       setExpenses([makeExpenseRow()]);
       setNotes("");
+      setStatus("draft");
     }
   }
 
@@ -448,11 +461,39 @@ function MainSystem({ session, profile, setProfile }) {
       notes,
       people,
       expenses,
+      status: "draft",
       updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from("invoice_months").upsert(payload, { onConflict: "user_id,school_id,target_month" });
     setSaveMessage(error ? `保存エラー：${error.message}` : `${targetMonth} 分を保存しました（同じ月は上書きされます）。`);
-    if (!error) loadSavedMonths();
+    if (!error) { setStatus("draft"); loadSavedMonths(); }
+  }
+
+  async function submitInvoice() {
+    if (!supabase) return;
+    setSubmitting(true);
+    setSaveMessage("提出中...");
+    const payload = {
+      user_id: session.user.id,
+      school_id: schoolId,
+      target_month: targetMonth,
+      invoice_date: invoiceDate,
+      invoice_no: invoiceNo,
+      issuer,
+      bank_info: bankInfo,
+      notes,
+      people,
+      expenses,
+      status: "submitted",
+      submitted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("invoice_months").upsert(payload, { onConflict: "user_id,school_id,target_month" });
+    setSubmitting(false);
+    if (error) { setSaveMessage("提出エラー：" + error.message); return; }
+    setStatus("submitted");
+    setSaveMessage(targetMonth + " 分を提出しました。管理者が確認できます。");
+    loadSavedMonths();
   }
 
   async function copyPreviousMonth() {
@@ -642,11 +683,23 @@ function MainSystem({ session, profile, setProfile }) {
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {mode === "invoice" && <Button variant="outline" onClick={saveInvoice} className="w-full"><Save className="mr-1 h-4 w-4" />保存</Button>}
+              {mode === "invoice" && <Button variant="outline" onClick={saveInvoice} className="w-full"><Save className="mr-1 h-4 w-4" />下書き保存</Button>}
               {mode === "invoice" && <Button onClick={downloadPdf} className="w-full"><FileText className="mr-1 h-4 w-4" />PDF保存</Button>}
               {mode === "invoice" && <Button variant="outline" onClick={printInvoice} className="w-full"><Printer className="mr-1 h-4 w-4" />印刷</Button>}
               <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
             </div>
+            {mode === "invoice" && (
+              <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold text-slate-700">{targetMonth} の状態</span>
+                  {status === "submitted"
+                    ? <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">提出済み（管理者と共有中）</span>
+                    : <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">下書き（未提出）</span>}
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-500">「下書き保存」はあなただけに見えます。内容が確定したら「提出」を押すと管理者が確認できます。提出後に下書き保存すると未提出に戻るので、もう一度提出してください。</p>
+                <Button onClick={submitInvoice} disabled={submitting} className="mt-3 w-full">{status === "submitted" ? "この内容で再提出する" : "この内容で提出する（確定）"}</Button>
+              </div>
+            )}
             {saveMessage && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{saveMessage}</div>}
           </div>
 
@@ -1306,6 +1359,118 @@ function PlaceholderPage({ mode, school, studentStats, totals, students, onBack 
             <p className="text-lg font-black">準備中</p>
             <p className="text-sm text-slate-600" style={{ wordBreak: "auto-phrase" }}>{meta.label}機能は今後のアップデートで追加予定です。ご要望があれば内容をお知らせください。</p>
           </div></Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function AdminSystem({ session, profile }) {
+  const [records, setRecords] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [filterSchool, setFilterSchool] = useState("all");
+  const [filterMonth, setFilterMonth] = useState("all");
+
+  useEffect(() => { loadAll(); }, []);
+
+  async function loadAll() {
+    setLoading(true);
+    if (!supabase) { setLoading(false); return; }
+    const { data, error } = await supabase
+      .from("invoice_months")
+      .select("*")
+      .eq("status", "submitted")
+      .order("submitted_at", { ascending: false });
+    if (error) setMessage("読み込みエラー：" + error.message);
+    setRecords(data || []);
+    setLoading(false);
+  }
+
+  async function logout() { await supabase.auth.signOut(); }
+  const printInvoice = () => window.print();
+
+  const months = Array.from(new Set(records.map((r) => r.target_month))).sort().reverse();
+  const schoolIds = Array.from(new Set(records.map((r) => r.school_id)));
+  const filtered = records.filter((r) =>
+    (filterSchool === "all" || r.school_id === filterSchool) &&
+    (filterMonth === "all" || r.target_month === filterMonth)
+  );
+
+  if (selected) {
+    const school = getSchoolById(selected.school_id);
+    const people = Array.isArray(selected.people) ? selected.people : [];
+    const expenses = Array.isArray(selected.expenses) ? selected.expenses : [];
+    const totals = calcTotals(people, expenses);
+    return (
+      <div className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-4 md:p-8 print:bg-white print:p-0">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_560px] print:block">
+          <section className="space-y-3 print:hidden">
+            <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <div className="mb-4 h-2 w-24 rounded-full bg-gradient-to-r from-emerald-500 via-orange-400 to-pink-500" />
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-600">Sowers FC System｜管理者</p>
+              <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900">請求書の確認</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{school.area}｜{school.name} ／ 対象月 {selected.target_month} ／ 請求者 {selected.issuer || "未入力"}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button variant="outline" onClick={() => setSelected(null)} className="w-full"><ChevronLeft className="mr-1 h-4 w-4" />一覧に戻る</Button>
+              <Button variant="outline" onClick={printInvoice} className="w-full"><Printer className="mr-1 h-4 w-4" />PDF保存・印刷</Button>
+            </div>
+            <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
+          </section>
+          <section className="space-y-4 print:space-y-0">
+            <InvoicePreview recipient="Sowers株式会社" invoiceNo={selected.invoice_no} invoiceDate={selected.invoice_date} targetMonth={selected.target_month} issuer={selected.issuer} school={school} people={people} expenses={expenses} totals={totals} bankInfo={selected.bank_info} notes={selected.notes} />
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-4 md:p-8">
+      <div className="mx-auto max-w-4xl space-y-4">
+        <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 h-2 w-24 rounded-full bg-gradient-to-r from-emerald-500 via-orange-400 to-pink-500" />
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-600">Sowers FC System｜管理者</p>
+          <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">提出された請求書</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">先生が「提出」した請求書がここに並びます（{profile.display_name || session.user.email}）。</p>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <SelectInput value={filterSchool} onChange={setFilterSchool}>
+            <option value="all">すべての教室</option>
+            {schoolIds.map((id) => { const sc = getSchoolById(id); return <option key={id} value={id}>{sc.area}｜{sc.name}</option>; })}
+          </SelectInput>
+          <SelectInput value={filterMonth} onChange={setFilterMonth}>
+            <option value="all">すべての月</option>
+            {months.map((m) => <option key={m} value={m}>{m}</option>)}
+          </SelectInput>
+          <Button variant="outline" onClick={loadAll} className="w-full sm:w-auto">再読み込み</Button>
+        </div>
+        {message && <div className="rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{message}</div>}
+        {loading ? (
+          <div className="rounded-2xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm">読み込み中...</div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm">提出された請求書はまだありません。</div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map((r) => {
+              const school = getSchoolById(r.school_id);
+              const totals = calcTotals(r.people, r.expenses);
+              const submitted = r.submitted_at ? String(r.submitted_at).slice(0, 10) : "";
+              return (
+                <div key={r.id} className="grid grid-cols-1 gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center">
+                  <div>
+                    <p className="text-base font-black text-slate-900">{school.area}｜{school.name}</p>
+                    <p className="mt-1 text-sm text-slate-600">対象月 {r.target_month} ／ 請求者 {r.issuer || "未入力"}</p>
+                    <p className="mt-1 text-sm font-bold text-emerald-700">請求金額 {yen(totals.total)}{submitted ? "　提出日 " + submitted : ""}</p>
+                  </div>
+                  <Button onClick={() => setSelected(r)} className="w-full sm:w-auto"><FileText className="mr-1 h-4 w-4" />開いて確認</Button>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
