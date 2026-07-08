@@ -860,6 +860,10 @@ function MainSystem({ session, profile, setProfile }) {
                     <Button onClick={addExpense} className="w-full sm:w-auto"><Plus className="mr-1 h-4 w-4" />経費を追加</Button>
                   </div>
 
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                    集金・控除（例：教室で受け取った現金をお給料から差し引く場合）は、「金額」欄にマイナスで入力してください（例：-9000）。合計から自動で差し引かれます。備考に文章で書いても金額としては計算されません。
+                  </div>
+
                   <div className="space-y-3">
                     {expenses.map((expense, index) => {
                       const expenseSubtotal = safeNumber(expense.quantity) * safeNumber(expense.amount);
