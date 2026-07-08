@@ -1377,8 +1377,24 @@ function AdminSystem({ session, profile }) {
   const [message, setMessage] = useState("");
   const [filterSchool, setFilterSchool] = useState("all");
   const [filterMonth, setFilterMonth] = useState("all");
+  const [roster, setRoster] = useState([]);
 
   useEffect(() => { loadAll(); }, []);
+
+  useEffect(() => {
+    if (!selected || !supabase) { setRoster([]); return; }
+    (async () => {
+      const { data } = await supabase
+        .from("students")
+        .select("*")
+        .eq("school_id", selected.school_id)
+        .neq("status", "withdrawn")
+        .order("page_no")
+        .order("created_at");
+      const m = selected.target_month;
+      setRoster((data || []).filter((s) => !s.join_month || s.join_month <= m));
+    })();
+  }, [selected]);
 
   async function loadAll() {
     setLoading(true);
@@ -1387,6 +1403,7 @@ function AdminSystem({ session, profile }) {
       .from("invoice_months")
       .select("*")
       .eq("status", "submitted")
+      .order("target_month", { ascending: false })
       .order("submitted_at", { ascending: false });
     if (error) setMessage("読み込みエラー：" + error.message);
     setRecords(data || []);
@@ -1426,6 +1443,38 @@ function AdminSystem({ session, profile }) {
           </section>
           <section className="space-y-4 print:space-y-0">
             <InvoicePreview recipient="Sowers株式会社" invoiceNo={selected.invoice_no} invoiceDate={selected.invoice_date} targetMonth={selected.target_month} issuer={selected.issuer} school={school} people={people} expenses={expenses} totals={totals} bankInfo={selected.bank_info} notes={selected.notes} />
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm print:hidden">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-base font-black text-slate-900">生徒名簿（{selected.target_month} 在籍）</h3>
+                <span className="text-sm font-bold text-slate-500">{roster.length}名</span>
+              </div>
+              {roster.length === 0 ? (
+                <p className="text-sm text-slate-500">この月に在籍していた生徒は見つかりませんでした。</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[420px] border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-50">
+                        <th className="border border-slate-300 p-2 text-left">氏名</th>
+                        <th className="border border-slate-300 p-2 text-left">クラス</th>
+                        <th className="border border-slate-300 p-2 text-left">入会月</th>
+                        <th className="border border-slate-300 p-2 text-left">状態</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roster.map((st) => (
+                        <tr key={st.id}>
+                          <td className="border border-slate-300 p-2">{st.full_name}</td>
+                          <td className="border border-slate-300 p-2">{st.class_name || "-"}</td>
+                          <td className="border border-slate-300 p-2">{st.join_month || "-"}</td>
+                          <td className="border border-slate-300 p-2">{st.status === "suspended" ? "休会" : "在籍"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </section>
         </div>
       </div>
