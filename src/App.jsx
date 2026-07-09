@@ -471,6 +471,7 @@ function MainSystem({ session, profile, setProfile }) {
 
   async function submitInvoice() {
     if (!supabase) return;
+    if (!window.confirm("請求書を提出します。生徒名簿は最新の状態に更新しましたか？\nこの時点の名簿が管理者に記録されます。よろしければ「OK」を押してください。")) return;
     setSubmitting(true);
     setSaveMessage("提出中...");
     const payload = {
@@ -484,6 +485,7 @@ function MainSystem({ session, profile, setProfile }) {
       notes,
       people,
       expenses,
+      roster: (students || []).map((s) => ({ id: s.id, full_name: s.full_name, class_name: s.class_name, join_month: s.join_month, status: s.status, page_no: s.page_no })),
       status: "submitted",
       submitted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -1382,7 +1384,14 @@ function AdminSystem({ session, profile }) {
   useEffect(() => { loadAll(); }, []);
 
   useEffect(() => {
-    if (!selected || !supabase) { setRoster([]); return; }
+    if (!selected) { setRoster([]); return; }
+    const m = selected.target_month;
+    const snap = Array.isArray(selected.roster) ? selected.roster : [];
+    if (snap.length) {
+      setRoster(snap.filter((s) => (s.status || "active") !== "withdrawn" && (!s.join_month || s.join_month <= m)));
+      return;
+    }
+    if (!supabase) { setRoster([]); return; }
     (async () => {
       const { data } = await supabase
         .from("students")
@@ -1391,7 +1400,6 @@ function AdminSystem({ session, profile }) {
         .neq("status", "withdrawn")
         .order("page_no")
         .order("created_at");
-      const m = selected.target_month;
       setRoster((data || []).filter((s) => !s.join_month || s.join_month <= m));
     })();
   }, [selected]);
