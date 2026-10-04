@@ -63,6 +63,19 @@ function makeWorkRow(rate, workDetail = "Aクラス メイン") {
 function makePerson(rate, name = "") {
   return { id: uniqueId(), name, works: [makeWorkRow(rate)] };
 }
+// 給料ルール：メイン＝クラス在籍1〜4人は1日2,000円、5人目から1人ごとに+500円／サブ＝1,100円（変更可）。室川は従来どおり単価を手入力。
+const FLAT_RATE_SCHOOLS = ["murokawa-acro"];
+const MAIN_BASE_RATE = 2000, MAIN_BASE_COUNT = 4, MAIN_STEP = 500, SUB_DEFAULT_RATE = 1100;
+function usesEnrollRule(schoolId) { return !FLAT_RATE_SCHOOLS.includes(schoolId); }
+function normClass(name) { return String(name || "").replace(/\s+/g, "").replace(/クラス$/, ""); }
+function countClassStudents(students, className) { const k = normClass(className); return (students || []).filter((s) => (s.status || "active") === "active" && normClass(s.class_name) === k).length; }
+function mainRateFor(count) { return MAIN_BASE_RATE + Math.max(0, count - MAIN_BASE_COUNT) * MAIN_STEP; }
+function workLabel(className, role) { return `${className}クラス ${role === "sub" ? "サブ" : "メイン"}`; }
+function newWorkFor(school) {
+  const cls = school.classes[0]?.name || "A";
+  if (!usesEnrollRule(school.id)) return makeWorkRow(school.defaultRate, `${cls}クラス メイン`);
+  return { ...makeWorkRow(MAIN_BASE_RATE, workLabel(cls, "main")), role: "main", className: cls };
+}
 function makeExpenseRow() {
   return { id: uniqueId(), applicant: "", item: "", quantity: 1, amount: "", memo: "" };
 }
@@ -399,6 +412,23 @@ function MainSystem({ session, profile, setProfile }) {
 
   const visibleStudents = students;
 
+  // メインの先生の1日単価を、クラスの在籍人数（生徒名簿の「在籍」）から自動で合わせる
+  const enrollRule = usesEnrollRule(schoolId);
+  useEffect(() => {
+    if (!enrollRule) return;
+    setPeople((prev) => {
+      let changed = false;
+      const next = prev.map((person) => ({ ...person, works: person.works.map((work) => {
+        if (work.role !== "main") return work;
+        const rate = mainRateFor(countClassStudents(students, work.className));
+        if (safeNumber(work.rate) === rate) return work;
+        changed = true;
+        return { ...work, rate };
+      }) }));
+      return changed ? next : prev;
+    });
+  }, [students, people, enrollRule]);
+
   useEffect(() => {
     loadInvoice();
     loadStudents();
@@ -440,7 +470,7 @@ function MainSystem({ session, profile, setProfile }) {
     } else {
       const defaultClassName = school.classes[0]?.name || "A";
       setPeople([makePerson(school.defaultRate, "")]);
-      setPeople([{ ...makePerson(school.defaultRate, ""), works: [makeWorkRow(school.defaultRate, `${defaultClassName}クラス メイン`)] }]);
+      setPeople([{ ...makePerson(school.defaultRate, ""), works: [newWorkFor(school)] }]);
       setExpenses([makeExpenseRow()]);
       setNotes("");
       setStatus("draft");
@@ -591,9 +621,19 @@ function MainSystem({ session, profile, setProfile }) {
         : person
     ));
   };
+  const updateWorkFields = (personId, workId, fields) => setPeople((prev) => prev.map((person) => person.id === personId ? { ...person, works: person.works.map((work) => (work.id === workId ? { ...work, ...fields } : work)) } : person));
+  const changeWorkRole = (personId, work, role) => {
+    if (!role) return;
+    const cls = work.className || school.classes[0]?.name || "A";
+    updateWorkFields(personId, work.id, { role, className: cls, rate: role === "sub" ? SUB_DEFAULT_RATE : mainRateFor(countClassStudents(students, cls)), workDetail: workLabel(cls, role) });
+  };
+  const changeWorkClass = (personId, work, className) => {
+    if (!className) return;
+    updateWorkFields(personId, work.id, { className, workDetail: workLabel(className, work.role), ...(work.role === "main" ? { rate: mainRateFor(countClassStudents(students, className)) } : {}) });
+  };
   const addPerson = () => {
     const defaultClassName = school.classes[0]?.name || "A";
-    const next = { ...makePerson(school.defaultRate, ""), works: [makeWorkRow(school.defaultRate, `${defaultClassName}クラス メイン`)] };
+    const next = { ...makePerson(school.defaultRate, ""), works: [newWorkFor(school)] };
     setPeople((prev) => [...prev, next]);
     setActivePersonId(next.id);
   };
@@ -607,7 +647,7 @@ function MainSystem({ session, profile, setProfile }) {
   };
   const addWork = (personId) => {
     const defaultClassName = school.classes[0]?.name || "A";
-    setPeople((prev) => prev.map((person) => person.id === personId ? { ...person, works: [...person.works, makeWorkRow(school.defaultRate, `${defaultClassName}クラス メイン`)] } : person));
+    setPeople((prev) => prev.map((person) => person.id === personId ? { ...person, works: [...person.works, newWorkFor(school)] } : person));
   };
   const removeWork = (personId, workId) => {
     setPeople((prev) => prev.map((person) => person.id === personId ? { ...person, works: person.works.length === 1 ? person.works : person.works.filter((work) => work.id !== workId) } : person));
@@ -804,6 +844,25 @@ function MainSystem({ session, profile, setProfile }) {
                               </div>
 
                               <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
+                                {enrollRule && (
+                                  <>
+                                    <div className="space-y-1 md:col-span-3">
+                                      <FieldLabel>役割</FieldLabel>
+                                      <SelectInput value={work.role || ""} onChange={(value) => changeWorkRole(activePerson.id, work, value)}>
+                                        {!work.role && <option value="">手入力（以前のデータ）</option>}
+                                        <option value="main">メイン</option>
+                                        <option value="sub">サブ</option>
+                                      </SelectInput>
+                                    </div>
+                                    <div className="space-y-1 md:col-span-3">
+                                      <FieldLabel>クラス</FieldLabel>
+                                      <SelectInput value={work.className || ""} onChange={(value) => changeWorkClass(activePerson.id, work, value)}>
+                                        {!work.className && <option value="">選択してください</option>}
+                                        {school.classes.map((c) => <option key={c.name} value={c.name}>{c.name}クラス</option>)}
+                                      </SelectInput>
+                                    </div>
+                                  </>
+                                )}
                                 <div className="space-y-1 md:col-span-2">
                                   <FieldLabel>担当したクラス・業務名</FieldLabel>
                                   <TextInput value={work.workDetail} onChange={(event) => updateWork(activePerson.id, work.id, "workDetail", event.target.value)} placeholder="例：Aクラス メイン" />
@@ -816,9 +875,12 @@ function MainSystem({ session, profile, setProfile }) {
                                   </button>
                                 </div>
                                 <div className="space-y-1">
-                                  <FieldLabel>1日単価</FieldLabel>
-                                  <TextInput type="number" value={work.rate} onChange={(event) => updateWork(activePerson.id, work.id, "rate", event.target.value)} />
+                                  <FieldLabel>{enrollRule && work.role === "main" ? "1日単価（自動）" : "1日単価"}</FieldLabel>
+                                  <TextInput type="number" value={work.rate} readOnly={enrollRule && work.role === "main"} className={enrollRule && work.role === "main" ? "bg-slate-100" : ""} onChange={(event) => updateWork(activePerson.id, work.id, "rate", event.target.value)} />
                                 </div>
+                                {enrollRule && work.role === "main" && (
+                                  <p className="md:col-span-6 rounded-2xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">{work.className}クラスの在籍 {countClassStudents(students, work.className)}人 → 1日 {yen(work.rate)}（1〜4人は2,000円、5人目から1人ごとに+500円。人数は生徒名簿の「在籍」から数えます）</p>
+                                )}
                                 {isCalendarOpen && (
                                   <div className="md:col-span-6">
                                     <DateCalendar displayMonth={calendarMonth} selectedDates={work.dates} onToggle={(date) => updateWork(activePerson.id, work.id, "dates", toggleDate(work.dates, date))} onPrevMonth={() => setCalendarMonth((current) => addMonths(current, -1))} onNextMonth={() => setCalendarMonth((current) => addMonths(current, 1))} />
