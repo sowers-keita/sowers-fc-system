@@ -1,12 +1,16 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { CalendarDays, FileText, LogOut, Plus, Printer, Save, Trash2, UserPlus, Users, LayoutDashboard, TrendingUp, Wallet, Megaphone, BookOpen, ChevronLeft, Settings, KeyRound } from "lucide-react";
+import { CalendarDays, FileText, LogOut, Plus, Printer, Save, Trash2, UserPlus, Users, LayoutDashboard, TrendingUp, Wallet, Megaphone, BookOpen, ChevronLeft, Settings, KeyRound, Eye, X } from "lucide-react";
 import schools from "./schools.json";
+import { createDemoClient, resetDemo, DEMO_SCHOOL, DEMO_ADMIN, DEMO_TEACHER } from "./demo.js";
 
+// ?demo=1 で開くと、本番DBに接続しないデモ（テスト教室）で動く
+const DEMO = import.meta.env.VITE_FORCE_DEMO === "1" || (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("demo"));
+if (DEMO && !schools.some((s) => s.id === DEMO_SCHOOL.id)) schools.push(DEMO_SCHOOL);
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
-const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+const supabase = DEMO ? createDemoClient() : (supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null);
 
 function yen(value) {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(Number(value || 0));
@@ -100,6 +104,34 @@ function calcTotals(people, expenses) {
   const totalWorkDays = list.reduce((sum, person) => sum + personWorkDays(person), 0);
   const expenseTotal = exps.reduce((sum, expense) => sum + safeNumber(expense.quantity) * safeNumber(expense.amount), 0);
   return { workTotal, totalWorkDays, expenseTotal, total: workTotal + expenseTotal };
+}
+
+// 源泉徴収（給料・甲欄/乙欄）。対象は出勤の小計（経費は対象外）。1円未満切り捨て。
+const WH_LABEL = { none: "なし", kou: "甲欄", otsu: "乙欄" };
+const OTSU_DEFAULT_RATE = 3.063;
+function personKey(name) { return String(name || "").replace(/[\s\u3000]+/g, ""); }
+function rateTax(base, rate) { return Math.floor((Math.round(safeNumber(base)) * Math.round(safeNumber(rate) * 1000)) / 100000); }
+function whTax(entry, base) {
+  if (!entry || entry.type === "none") return 0;
+  if (entry.amount !== null && entry.amount !== undefined && entry.amount !== "") return Math.max(0, Math.floor(safeNumber(entry.amount)));
+  if (entry.type === "otsu") return Math.max(0, rateTax(base, entry.rate ?? OTSU_DEFAULT_RATE));
+  return 0;
+}
+function calcWithholding(people, withholding) {
+  const map = withholding && typeof withholding === "object" ? withholding : {};
+  const rows = (Array.isArray(people) ? people : []).map((p, i) => {
+    const key = personKey(p.name);
+    const base = personSubtotal(p);
+    const entry = key ? map[key] : null;
+    return { key, name: p.name || `人物${i + 1}`, base, entry: entry || null, tax: whTax(entry, base) };
+  });
+  return { rows, taxTotal: rows.reduce((s, r) => s + r.tax, 0), hasAny: rows.some((r) => r.entry) };
+}
+function whDesc(entry) {
+  if (!entry) return "未設定";
+  if (entry.type === "none") return "源泉なし";
+  if (entry.type === "otsu") return `乙欄 ${entry.rate ?? OTSU_DEFAULT_RATE}%${entry.amount !== null && entry.amount !== undefined && entry.amount !== "" ? "（金額手入力）" : ""}`;
+  return "甲欄";
 }
 
 function FieldLabel({ children }) { return <label className="text-sm font-bold text-slate-700">{children}</label>; }
@@ -309,6 +341,53 @@ function PasswordRecoveryScreen({ onDone }) {
 }
 
 export default function App() {
+  return DEMO ? <DemoApp /> : <RealApp />;
+}
+
+// 実際のアプリに出す「デモを試す」入口。デモの「デモを終了」を押すと、この端末では表示しなくなる
+const DEMO_HIDE_KEY = "fc_demo_hidden_v1";
+function demoHidden() { try { return localStorage.getItem(DEMO_HIDE_KEY) === "1"; } catch { return false; } }
+function endDemo() {
+  try { localStorage.setItem(DEMO_HIDE_KEY, "1"); } catch { /* 保存できない環境では何もしない */ }
+  window.location.href = window.location.pathname;
+}
+function DemoEntry() {
+  if (DEMO || demoHidden()) return null;
+  return (
+    <a href="?demo=1" className="flex items-center justify-between gap-3 rounded-3xl border-2 border-dashed border-sky-300 bg-sky-50 p-4 text-left shadow-sm transition hover:bg-sky-100">
+      <span>
+        <span className="block text-base font-black text-sky-800">デモを試す（テスト教室）</span>
+        <span className="mt-0.5 block text-xs leading-5 text-sky-800">源泉徴収（甲・乙）の設定と、先生からの見え方を本番データに触れずに試せます。経理担当の画面だけに表示されます。デモ画面の「デモを終了」を押すとこの案内は消えます。</span>
+      </span>
+      <Eye className="h-6 w-6 shrink-0 text-sky-600" />
+    </a>
+  );
+}
+
+// デモ：経理担当／テスト先生を切り替えて試せる（データはこの画面の中だけ・再読み込みで初期化）
+function DemoApp() {
+  const [role, setRole] = useState("admin");
+  const [ver, setVer] = useState(0);
+  const user = role === "admin" ? DEMO_ADMIN : DEMO_TEACHER;
+  const session = { user: { id: user.id, email: role === "admin" ? "経理担当（デモ）" : "テスト先生（デモ）", user_metadata: {} } };
+  return (
+    <div>
+      <div className="sticky top-0 z-40 flex flex-wrap items-center justify-center gap-2 bg-slate-900 px-3 py-2 text-xs font-bold text-white print:hidden">
+        <span className="rounded-full bg-amber-400 px-2 py-0.5 text-slate-900">デモ</span>
+        <span>本番データには接続していません</span>
+        <button type="button" onClick={() => { setRole("admin"); setVer((v) => v + 1); }} className={`rounded-full px-3 py-1 ${role === "admin" ? "bg-emerald-500" : "bg-white/15"}`}>経理担当で見る</button>
+        <button type="button" onClick={() => { setRole("teacher"); setVer((v) => v + 1); }} className={`rounded-full px-3 py-1 ${role === "teacher" ? "bg-emerald-500" : "bg-white/15"}`}>テスト先生で見る</button>
+        <button type="button" onClick={() => { resetDemo(); setVer((v) => v + 1); }} className="rounded-full bg-white/15 px-3 py-1">最初の状態に戻す</button>
+        <button type="button" onClick={endDemo} className="rounded-full bg-red-500 px-3 py-1">デモを終了</button>
+      </div>
+      {role === "admin"
+        ? <AdminSystem key={`a${ver}`} session={session} profile={DEMO_ADMIN} />
+        : <MainSystem key={`t${ver}`} session={session} profile={DEMO_TEACHER} setProfile={() => {}} />}
+    </div>
+  );
+}
+
+function RealApp() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [appReady, setAppReady] = useState(false);
@@ -357,15 +436,18 @@ export default function App() {
   return <MainSystem session={session} profile={profile} setProfile={setProfile} />;
 }
 
-function MainSystem({ session, profile, setProfile }) {
-  const allowedSchool = getSchoolById(profile.school_id);
-  const [mode, setMode] = useState("dashboard");
+function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview = null }) {
+  // viewAs = { userId, schoolId, targetMonth } … 経理担当が「先生からの見え方」を閲覧専用で確認するとき
+  const readOnly = !!viewAs;
+  const uid = viewAs ? viewAs.userId : session.user.id;
+  const allowedSchool = getSchoolById(viewAs ? viewAs.schoolId : profile.school_id);
+  const [mode, setMode] = useState(viewAs ? "invoice" : "dashboard");
   const [schoolId, setSchoolId] = useState(allowedSchool.id);
   const school = getSchoolById(schoolId);
   const recipient = "Sowers株式会社";
 
   const [invoiceDate, setInvoiceDate] = useState(todayString());
-  const [targetMonth, setTargetMonth] = useState(monthString());
+  const [targetMonth, setTargetMonth] = useState(viewAs?.targetMonth || monthString());
   const [issuer, setIssuer] = useState(profile.display_name || "");
   const [invoiceNo, setInvoiceNo] = useState(`SW-${todayString().split("-").join("")}`);
   const [bankInfo, setBankInfo] = useState("");
@@ -373,12 +455,13 @@ function MainSystem({ session, profile, setProfile }) {
   const [people, setPeople] = useState([makePerson(school.defaultRate, "")]);
   const [activePersonId, setActivePersonId] = useState(null);
   const [openCalendarKey, setOpenCalendarKey] = useState(null);
-  const [calendarMonth, setCalendarMonth] = useState(monthString());
+  const [calendarMonth, setCalendarMonth] = useState(viewAs?.targetMonth || monthString());
   const [expenses, setExpenses] = useState([makeExpenseRow()]);
   const [saveMessage, setSaveMessage] = useState("");
   const [savedMonths, setSavedMonths] = useState([]);
   const [status, setStatus] = useState("draft");
   const [submitting, setSubmitting] = useState(false);
+  const [withholding, setWithholding] = useState({});
 
   const [students, setStudents] = useState([]);
   const [rosterPage, setRosterPage] = useState(1);
@@ -441,7 +524,7 @@ function MainSystem({ session, profile, setProfile }) {
     const { data } = await supabase
       .from("invoice_months")
       .select("target_month, updated_at")
-      .eq("user_id", session.user.id)
+      .eq("user_id", uid)
       .eq("school_id", schoolId)
       .order("target_month", { ascending: false });
     setSavedMonths(data || []);
@@ -452,7 +535,7 @@ function MainSystem({ session, profile, setProfile }) {
     const { data } = await supabase
       .from("invoice_months")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", uid)
       .eq("school_id", schoolId)
       .eq("target_month", targetMonth)
       .maybeSingle();
@@ -467,6 +550,7 @@ function MainSystem({ session, profile, setProfile }) {
       setExpenses(Array.isArray(data.expenses) && data.expenses.length ? data.expenses : [makeExpenseRow()]);
       setActivePersonId(null);
       setStatus(data.status === "submitted" ? "submitted" : "draft");
+      setWithholding(data.withholding && typeof data.withholding === "object" ? data.withholding : {});
     } else {
       const defaultClassName = school.classes[0]?.name || "A";
       setPeople([makePerson(school.defaultRate, "")]);
@@ -474,11 +558,12 @@ function MainSystem({ session, profile, setProfile }) {
       setExpenses([makeExpenseRow()]);
       setNotes("");
       setStatus("draft");
+      setWithholding({});
     }
   }
 
   async function saveInvoice() {
-    if (!supabase) return;
+    if (!supabase || readOnly) return;
     setSaveMessage("保存中...");
     const payload = {
       user_id: session.user.id,
@@ -500,7 +585,7 @@ function MainSystem({ session, profile, setProfile }) {
   }
 
   async function submitInvoice() {
-    if (!supabase) return;
+    if (!supabase || readOnly) return;
     if (!window.confirm("請求書を提出します。生徒名簿は最新の状態に更新しましたか？\nこの時点の名簿が管理者に記録されます。よろしければ「OK」を押してください。")) return;
     setSubmitting(true);
     setSaveMessage("提出中...");
@@ -529,12 +614,12 @@ function MainSystem({ session, profile, setProfile }) {
   }
 
   async function copyPreviousMonth() {
-    if (!supabase) return;
+    if (!supabase || readOnly) return;
     const prevMonth = addMonths(targetMonth, -1);
     const { data, error } = await supabase
       .from("invoice_months")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", uid)
       .eq("school_id", schoolId)
       .eq("target_month", prevMonth)
       .maybeSingle();
@@ -565,7 +650,7 @@ function MainSystem({ session, profile, setProfile }) {
     const { data } = await supabase
       .from("students")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", uid)
       .eq("school_id", schoolId)
       .order("page_no", { ascending: true })
       .order("created_at", { ascending: false });
@@ -573,7 +658,7 @@ function MainSystem({ session, profile, setProfile }) {
   }
 
   async function addStudent() {
-    if (!supabase) return;
+    if (!supabase || readOnly) return;
     const { data, error } = await supabase
       .from("students")
       .insert({
@@ -598,20 +683,24 @@ function MainSystem({ session, profile, setProfile }) {
   }
 
   async function updateStudent(id, key, value) {
+    if (readOnly) return;
     setStudents((prev) => prev.map((student) => (student.id === id ? { ...student, [key]: value } : student)));
     if (!supabase) return;
-    await supabase.from("students").update({ [key]: value, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", session.user.id);
+    await supabase.from("students").update({ [key]: value, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", uid);
   }
 
   async function deleteStudent(id) {
+    if (readOnly) return;
     setStudents((prev) => prev.filter((student) => student.id !== id));
     if (!supabase) return;
-    await supabase.from("students").delete().eq("id", id).eq("user_id", session.user.id);
+    await supabase.from("students").delete().eq("id", id).eq("user_id", uid);
   }
 
   async function logout() {
+    if (readOnly) { onExitPreview && onExitPreview(); return; }
     await supabase.auth.signOut();
   }
+  const whCalc = calcWithholding(people, withholding);
 
   const updatePerson = (personId, key, value) => setPeople((prev) => prev.map((person) => (person.id === personId ? { ...person, [key]: value } : person)));
   const updateWork = (personId, workId, key, value) => {
@@ -693,7 +782,7 @@ function MainSystem({ session, profile, setProfile }) {
     );
   }
 
-  if (mode === "account") {
+  if (mode === "account" && !readOnly) {
     return (
       <AccountPanel
         session={session}
@@ -717,7 +806,15 @@ function MainSystem({ session, profile, setProfile }) {
               <p className="mt-2 text-sm leading-6 text-slate-600">{school.name} / {profile.display_name || session.user.email}</p>
             </div>
 
-            <button type="button" onClick={() => setMode("dashboard")} className="inline-flex items-center gap-1 text-sm font-bold text-emerald-700 hover:text-emerald-800"><ChevronLeft className="h-4 w-4" />ダッシュボードに戻る</button>
+            {readOnly ? (
+              <div className="rounded-3xl border-2 border-sky-300 bg-sky-50 p-4">
+                <p className="flex items-center gap-1 text-sm font-black text-sky-800"><Eye className="h-4 w-4" />先生からの見え方（閲覧専用）</p>
+                <p className="mt-1 text-xs leading-5 text-sky-800">「{profile.display_name}」さんのアカウントで表示される画面です。ここでは入力・保存はできません。</p>
+                <Button variant="outline" onClick={onExitPreview} className="mt-3 w-full"><ChevronLeft className="mr-1 h-4 w-4" />経理の画面に戻る</Button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setMode("dashboard")} className="inline-flex items-center gap-1 text-sm font-bold text-emerald-700 hover:text-emerald-800"><ChevronLeft className="h-4 w-4" />ダッシュボードに戻る</button>
+            )}
 
             <div className="grid grid-cols-2 gap-2">
               <Button variant={mode === "invoice" ? "primary" : "outline"} onClick={() => setMode("invoice")} className="w-full"><FileText className="mr-1 h-4 w-4" />請求書</Button>
@@ -725,10 +822,10 @@ function MainSystem({ session, profile, setProfile }) {
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {mode === "invoice" && <Button variant="outline" onClick={saveInvoice} className="w-full"><Save className="mr-1 h-4 w-4" />下書き保存</Button>}
+              {mode === "invoice" && !readOnly && <Button variant="outline" onClick={saveInvoice} className="w-full"><Save className="mr-1 h-4 w-4" />下書き保存</Button>}
               {mode === "invoice" && <Button onClick={downloadPdf} className="w-full"><FileText className="mr-1 h-4 w-4" />PDF保存</Button>}
               {mode === "invoice" && <Button variant="outline" onClick={printInvoice} className="w-full"><Printer className="mr-1 h-4 w-4" />印刷</Button>}
-              <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
+              {!readOnly && <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>}
             </div>
             {mode === "invoice" && (
               <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-sm">
@@ -739,12 +836,20 @@ function MainSystem({ session, profile, setProfile }) {
                     : <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">下書き（未提出）</span>}
                 </div>
                 <p className="mt-2 text-xs leading-5 text-slate-500">「下書き保存」はあなただけに見えます。内容が確定したら「提出」を押すと管理者が確認できます。提出後に下書き保存すると未提出に戻るので、もう一度提出してください。</p>
-                <Button onClick={submitInvoice} disabled={submitting} className="mt-3 w-full">{status === "submitted" ? "この内容で再提出する" : "この内容で提出する（確定）"}</Button>
+                {whCalc.hasAny && (
+                  <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
+                    <p className="font-bold">経理担当者が源泉徴収税を設定しました</p>
+                    {whCalc.rows.filter((r) => r.entry).map((r) => <p key={r.key}>{r.name}：{whDesc(r.entry)} −{yen(r.tax)}</p>)}
+                    <p className="mt-1 font-bold">お振込額は {yen(totals.total - whCalc.taxTotal)}（請求書の「差引お振込額」）です。</p>
+                  </div>
+                )}
+                {!readOnly && <Button onClick={submitInvoice} disabled={submitting} className="mt-3 w-full">{status === "submitted" ? "この内容で再提出する" : "この内容で提出する（確定）"}</Button>}
               </div>
             )}
             {saveMessage && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{saveMessage}</div>}
           </div>
 
+          <fieldset disabled={readOnly} className={`min-w-0 space-y-4 ${readOnly ? "opacity-80" : ""}`}>
           {mode === "invoice" ? (
             <>
               <Card>
@@ -976,6 +1081,7 @@ function MainSystem({ session, profile, setProfile }) {
               message={studentMessage}
             />
           )}
+          </fieldset>
         </section>
 
         <section className="space-y-4 print:space-y-0">
@@ -991,6 +1097,7 @@ function MainSystem({ session, profile, setProfile }) {
             totals={totals}
             bankInfo={bankInfo}
             notes={notes}
+            withholding={withholding}
           />
         </section>
       </div>
@@ -1133,7 +1240,8 @@ async function exportElementAsLongPdf(elementId, filename, onStatus) {
   }
 }
 
-function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer, school, people, expenses, totals, bankInfo, notes }) {
+function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer, school, people, expenses, totals, bankInfo, notes, withholding }) {
+  const wh = calcWithholding(people, withholding);
   return (
     <Card className="print:rounded-none print:shadow-none">
       <div id="invoice-pdf-area" className="bg-white p-4 md:p-8 print:p-0">
@@ -1217,6 +1325,15 @@ function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer
           <div className="flex justify-between"><span className="text-slate-500">出勤小計</span><span className="font-bold">{yen(totals.workTotal)}</span></div>
           <div className="flex justify-between"><span className="text-slate-500">経費小計</span><span className="font-bold">{yen(totals.expenseTotal)}</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-slate-300 pt-2"><span className="text-base font-black">合計金額</span><span className="text-lg font-black text-emerald-700">{yen(totals.total)}</span></div>
+          {wh.hasAny && (
+            <>
+              {wh.rows.filter((r) => r.entry && r.entry.type !== "none").map((r) => (
+                <div key={r.key} className="flex justify-between text-slate-600"><span>源泉徴収税　{r.name}（{whDesc(r.entry)}）</span><span className="font-bold">−{yen(r.tax)}</span></div>
+              ))}
+              <div className="mt-1 flex items-center justify-between border-t border-slate-300 pt-2"><span className="text-base font-black">差引お振込額</span><span className="text-lg font-black text-sky-700">{yen(totals.total - wh.taxTotal)}</span></div>
+              <p className="text-[11px] leading-4 text-slate-400">※源泉徴収税は経理担当者が設定します（対象は出勤の報酬分・経費は対象外）。</p>
+            </>
+          )}
         </div>
 
         <div className="pdf-block grid grid-cols-1 gap-4 text-sm">
@@ -1442,8 +1559,48 @@ function AdminSystem({ session, profile }) {
   const [filterSchool, setFilterSchool] = useState("all");
   const [filterMonth, setFilterMonth] = useState("all");
   const [roster, setRoster] = useState([]);
+  const [settings, setSettings] = useState({});
+  const [editing, setEditing] = useState(null); // 源泉徴収を設定中の人物 { key, name, base }
+  const [preview, setPreview] = useState(null);  // 先生からの見え方（閲覧専用）
 
   useEffect(() => { loadAll(); }, []);
+
+  // 前に設定した区分（甲・乙）を、まだ設定のない請求書に自動で引き継ぐ
+  useEffect(() => {
+    if (!selected || !supabase) return;
+    const current = selected.withholding && typeof selected.withholding === "object" ? selected.withholding : {};
+    const add = {};
+    (Array.isArray(selected.people) ? selected.people : []).forEach((p) => {
+      const key = personKey(p.name);
+      const st = settings[key];
+      if (key && !current[key] && st) add[key] = { type: st.type, rate: st.rate ?? OTSU_DEFAULT_RATE, amount: st.type === "kou" ? safeNumber(st.kou_amount) : null, carried: true };
+    });
+    if (!Object.keys(add).length) return;
+    saveWithholding(selected, { ...current, ...add });
+  }, [selected?.id, settings]);
+
+  async function saveWithholding(record, nextMap) {
+    const { error } = await supabase.from("invoice_months").update({ withholding: nextMap }).eq("id", record.id);
+    if (error) { setMessage("源泉徴収の保存エラー：" + error.message); return false; }
+    const next = { ...record, withholding: nextMap };
+    setRecords((prev) => prev.map((r) => (r.id === record.id ? next : r)));
+    setSelected((cur) => (cur && cur.id === record.id ? next : cur));
+    return true;
+  }
+
+  async function saveSetting(row, entry) {
+    // 1) この請求書の分を保存
+    const current = selected.withholding && typeof selected.withholding === "object" ? selected.withholding : {};
+    const ok = await saveWithholding(selected, { ...current, [row.key]: { type: entry.type, rate: entry.rate, amount: entry.amount } });
+    if (!ok) return;
+    // 2) 翌月以降も同じ区分を使えるように人事設定として保存
+    const st = { person_key: row.key, person_name: row.name, type: entry.type, rate: entry.rate, kou_amount: entry.type === "kou" ? safeNumber(entry.amount) : null, updated_at: new Date().toISOString(), updated_by: session.user.id };
+    const { error } = await supabase.from("fc_withholding_settings").upsert(st, { onConflict: "person_key" });
+    if (error) { setMessage("人事設定の保存エラー：" + error.message); return; }
+    setSettings((prev) => ({ ...prev, [row.key]: st }));
+    setEditing(null);
+    setMessage(`${row.name} さんの源泉徴収を保存しました（翌月以降も同じ設定で自動入力されます）。`);
+  }
 
   useEffect(() => {
     if (!selected) { setRoster([]); return; }
@@ -1477,6 +1634,8 @@ function AdminSystem({ session, profile }) {
       .order("submitted_at", { ascending: false });
     if (error) setMessage("読み込みエラー：" + error.message);
     setRecords(data || []);
+    const { data: st } = await supabase.from("fc_withholding_settings").select("*");
+    setSettings(Object.fromEntries((st || []).map((r) => [r.person_key, r])));
     setLoading(false);
   }
 
@@ -1490,11 +1649,24 @@ function AdminSystem({ session, profile }) {
     (filterMonth === "all" || r.target_month === filterMonth)
   );
 
+  if (selected && preview) {
+    return (
+      <MainSystem
+        session={session}
+        profile={{ display_name: selected.issuer || "先生", school_id: selected.school_id, role: "teacher" }}
+        setProfile={() => {}}
+        viewAs={{ userId: selected.user_id, schoolId: selected.school_id, targetMonth: selected.target_month }}
+        onExitPreview={() => setPreview(null)}
+      />
+    );
+  }
+
   if (selected) {
     const school = getSchoolById(selected.school_id);
     const people = Array.isArray(selected.people) ? selected.people : [];
     const expenses = Array.isArray(selected.expenses) ? selected.expenses : [];
     const totals = calcTotals(people, expenses);
+    const wh = calcWithholding(people, selected.withholding);
     return (
       <div className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-4 md:p-8 print:bg-white print:p-0">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_560px] print:block">
@@ -1506,13 +1678,39 @@ function AdminSystem({ session, profile }) {
               <p className="mt-2 text-sm leading-6 text-slate-600">{school.area}｜{school.name} ／ 対象月 {selected.target_month} ／ 請求者 {selected.issuer || "未入力"}</p>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button variant="outline" onClick={() => setSelected(null)} className="w-full"><ChevronLeft className="mr-1 h-4 w-4" />一覧に戻る</Button>
+              <Button variant="outline" onClick={() => { setSelected(null); setMessage(""); }} className="w-full"><ChevronLeft className="mr-1 h-4 w-4" />一覧に戻る</Button>
               <Button variant="outline" onClick={printInvoice} className="w-full"><Printer className="mr-1 h-4 w-4" />PDF保存・印刷</Button>
             </div>
+            <Button onClick={() => setPreview(true)} className="w-full bg-sky-600 hover:bg-sky-700"><Eye className="mr-1 h-4 w-4" />先生からの見え方を確認</Button>
+            {message && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</div>}
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="h-1.5 w-20 rounded-full bg-sky-500" />
+              <h2 className="mt-3 text-lg font-black">源泉徴収税（給料）</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-500">先生の名前をタップして甲欄・乙欄を設定します。乙欄は出勤の報酬分×3.063%を自動入力（1円未満切り捨て）。金額は後から変更できます。一度設定すると翌月以降も同じ区分で自動入力されます。</p>
+              <div className="mt-3 space-y-2">
+                {wh.rows.map((r) => (
+                  <button key={r.key || r.name} type="button" disabled={!r.key} onClick={() => setEditing(r)} className="grid w-full grid-cols-[1fr_auto] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-sky-400 hover:bg-sky-50 disabled:opacity-50">
+                    <span>
+                      <span className="block text-base font-black text-sky-800 underline decoration-sky-300 underline-offset-4">{r.name}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">報酬 {yen(r.base)}　／　{r.entry ? whDesc(r.entry) : <b className="text-amber-600">未設定（タップして設定）</b>}{r.entry?.carried ? "　※前回の設定を引き継ぎ" : ""}</span>
+                    </span>
+                    <span className="text-right text-sm font-black">{r.entry ? `−${yen(r.tax)}` : "—"}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 space-y-1 rounded-2xl bg-slate-50 p-3 text-sm">
+                <div className="flex justify-between"><span className="text-slate-500">請求金額（報酬＋経費）</span><b>{yen(totals.total)}</b></div>
+                <div className="flex justify-between"><span className="text-slate-500">源泉徴収税 合計</span><b>−{yen(wh.taxTotal)}</b></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1"><span className="font-black">差引お振込額</span><b className="text-sky-700">{yen(totals.total - wh.taxTotal)}</b></div>
+              </div>
+            </div>
+
             <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
           </section>
+          {editing && <WithholdingModal row={editing} entry={(selected.withholding || {})[editing.key]} setting={settings[editing.key]} onClose={() => setEditing(null)} onSave={(entry) => saveSetting(editing, entry)} />}
           <section className="space-y-4 print:space-y-0">
-            <InvoicePreview recipient="Sowers株式会社" invoiceNo={selected.invoice_no} invoiceDate={selected.invoice_date} targetMonth={selected.target_month} issuer={selected.issuer} school={school} people={people} expenses={expenses} totals={totals} bankInfo={selected.bank_info} notes={selected.notes} />
+            <InvoicePreview recipient="Sowers株式会社" invoiceNo={selected.invoice_no} invoiceDate={selected.invoice_date} targetMonth={selected.target_month} issuer={selected.issuer} school={school} people={people} expenses={expenses} totals={totals} bankInfo={selected.bank_info} notes={selected.notes} withholding={selected.withholding} />
             <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm print:hidden">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-base font-black text-slate-900">生徒名簿（{selected.target_month} 在籍）</h3>
@@ -1560,6 +1758,7 @@ function AdminSystem({ session, profile }) {
           <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">提出された請求書</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">先生が「提出」した請求書がここに並びます（{profile.display_name || session.user.email}）。</p>
         </div>
+        <DemoEntry />
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
           <SelectInput value={filterSchool} onChange={setFilterSchool}>
             <option value="all">すべての教室</option>
@@ -1581,6 +1780,8 @@ function AdminSystem({ session, profile }) {
             {filtered.map((r) => {
               const school = getSchoolById(r.school_id);
               const totals = calcTotals(r.people, r.expenses);
+              const whr = calcWithholding(r.people, r.withholding);
+              const unset = whr.rows.filter((x) => !x.entry && !settings[x.key]).length;
               const submitted = r.submitted_at ? String(r.submitted_at).slice(0, 10) : "";
               return (
                 <div key={r.id} className="grid grid-cols-1 gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center">
@@ -1588,6 +1789,7 @@ function AdminSystem({ session, profile }) {
                     <p className="text-base font-black text-slate-900">{school.area}｜{school.name}</p>
                     <p className="mt-1 text-sm text-slate-600">対象月 {r.target_month} ／ 請求者 {r.issuer || "未入力"}</p>
                     <p className="mt-1 text-sm font-bold text-emerald-700">請求金額 {yen(totals.total)}{submitted ? "　提出日 " + submitted : ""}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">源泉 −{yen(whr.taxTotal)}　差引お振込額 <span className="text-sky-700">{yen(totals.total - whr.taxTotal)}</span>{unset ? <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">源泉未設定 {unset}名</span> : null}</p>
                   </div>
                   <Button onClick={() => setSelected(r)} className="w-full sm:w-auto"><FileText className="mr-1 h-4 w-4" />開いて確認</Button>
                 </div>
@@ -1595,6 +1797,75 @@ function AdminSystem({ session, profile }) {
             })}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// 源泉徴収の設定ポップアップ（経理担当者用）
+function WithholdingModal({ row, entry, setting, onClose, onSave }) {
+  const init = entry || (setting ? { type: setting.type, rate: setting.rate, amount: setting.type === "kou" ? setting.kou_amount : null } : null);
+  const [type, setType] = useState(init?.type || "otsu");
+  const [rate, setRate] = useState(String(init?.rate ?? OTSU_DEFAULT_RATE));
+  const hasManual = init && init.amount !== null && init.amount !== undefined && init.amount !== "";
+  const [manual, setManual] = useState(init?.type === "otsu" ? !!hasManual : false);
+  const [amount, setAmount] = useState(hasManual ? String(init.amount) : "");
+  const [saving, setSaving] = useState(false);
+  const auto = rateTax(row.base, rate);
+  const shown = type === "otsu" ? (manual ? amount : String(auto)) : type === "kou" ? amount : "0";
+  const tax = type === "none" ? 0 : Math.max(0, Math.floor(safeNumber(shown)));
+
+  const save = async () => {
+    setSaving(true);
+    await onSave({
+      type,
+      rate: safeNumber(rate) || OTSU_DEFAULT_RATE,
+      amount: type === "none" ? null : type === "otsu" ? (manual ? Math.max(0, Math.floor(safeNumber(amount))) : null) : Math.max(0, Math.floor(safeNumber(amount))),
+    });
+    setSaving(false);
+  };
+  const choice = (v, label, sub) => (
+    <button type="button" onClick={() => setType(v)} className={`rounded-2xl border-2 px-3 py-3 text-center transition ${type === v ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-sky-300"}`}>
+      <span className="block text-base font-black">{label}</span><span className="block text-[11px] opacity-80">{sub}</span>
+    </button>
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-3 sm:items-center print:hidden" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="h-2 bg-gradient-to-r from-sky-500 via-emerald-400 to-orange-400" />
+        <div className="space-y-4 p-5">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold text-sky-700">源泉徴収税の設定</p>
+              <h3 className="text-xl font-black">{row.name}</h3>
+              <p className="text-xs text-slate-500">この月の報酬（出勤分） {yen(row.base)}</p>
+            </div>
+            <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {choice("kou", "甲", "扶養控除等申告書あり")}
+            {choice("otsu", "乙", "申告書なし")}
+            {choice("none", "なし", "徴収しない")}
+          </div>
+          {type === "otsu" && (
+            <div className="space-y-2">
+              <FieldLabel>税率（%）</FieldLabel>
+              <TextInput type="number" step="0.001" value={rate} onChange={(e) => setRate(e.target.value)} />
+            </div>
+          )}
+          {type !== "none" && (
+            <div className="space-y-2">
+              <FieldLabel>源泉徴収税額（円）{type === "otsu" && !manual ? "　自動計算" : ""}</FieldLabel>
+              <TextInput type="number" value={shown} onChange={(e) => { if (type === "otsu") setManual(true); setAmount(e.target.value); }} placeholder="0" />
+              {type === "otsu" && (manual
+                ? <button type="button" onClick={() => { setManual(false); setAmount(""); }} className="text-xs font-bold text-sky-700">自動計算（{yen(row.base)} × {rate}% = {yen(auto)}）に戻す</button>
+                : <p className="text-xs text-slate-500">{yen(row.base)} × {rate}% ＝ {yen(auto)}（1円未満切り捨て）。金額を直接書き換えることもできます。</p>)}
+              {type === "kou" && <p className="text-xs leading-5 text-slate-500">甲欄は源泉徴収税額表（月額表）で、支給額と扶養の人数から求めた金額を入力してください。入力した金額は翌月も初期値として入ります。</p>}
+            </div>
+          )}
+          <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 text-sm"><span className="font-bold">この月の源泉徴収税</span><span className="text-lg font-black text-sky-700">−{yen(tax)}</span></div>
+          <Button onClick={save} disabled={saving} className="w-full bg-sky-600 hover:bg-sky-700"><Save className="mr-1 h-4 w-4" />{saving ? "保存中..." : "保存する（翌月以降も同じ設定）"}</Button>
+        </div>
       </div>
     </div>
   );
