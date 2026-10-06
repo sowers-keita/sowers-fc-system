@@ -109,6 +109,9 @@ function calcTotals(people, expenses) {
 // 源泉徴収（給料・甲欄/乙欄）。対象は出勤の小計（経費は対象外）。1円未満切り捨て。
 const WH_LABEL = { none: "なし", kou: "甲欄", otsu: "乙欄" };
 const OTSU_DEFAULT_RATE = 3.063;
+// 乙欄で3.063%になるのは月の支給額が105,000円未満のとき（令和8年分 月額表）。それ以上は税額表の金額を手入力する
+const OTSU_FLAT_LIMIT = 105000;
+function otsuNeedsTable(entry, base) { return !!entry && entry.type === "otsu" && safeNumber(base) >= OTSU_FLAT_LIMIT && (entry.amount === null || entry.amount === undefined || entry.amount === ""); }
 function personKey(name) { return String(name || "").replace(/[\s\u3000]+/g, ""); }
 function rateTax(base, rate) { return Math.floor((Math.round(safeNumber(base)) * Math.round(safeNumber(rate) * 1000)) / 100000); }
 function whTax(entry, base) {
@@ -839,7 +842,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
                 {whCalc.hasAny && (
                   <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
                     <p className="font-bold">経理担当者が源泉徴収税を設定しました</p>
-                    {whCalc.rows.filter((r) => r.entry).map((r) => <p key={r.key}>{r.name}：{whDesc(r.entry)} −{yen(r.tax)}</p>)}
+                    {whCalc.rows.filter((r) => r.entry && r.entry.type !== "none").map((r) => <p key={r.key}>{r.name}：源泉徴収税 −{yen(r.tax)}</p>)}
                     <p className="mt-1 font-bold">お振込額は {yen(totals.total - whCalc.taxTotal)}（請求書の「差引お振込額」）です。</p>
                   </div>
                 )}
@@ -1328,7 +1331,7 @@ function InvoicePreview({ recipient, invoiceNo, invoiceDate, targetMonth, issuer
           {wh.hasAny && (
             <>
               {wh.rows.filter((r) => r.entry && r.entry.type !== "none").map((r) => (
-                <div key={r.key} className="flex justify-between text-slate-600"><span>源泉徴収税　{r.name}（{whDesc(r.entry)}）</span><span className="font-bold">−{yen(r.tax)}</span></div>
+                <div key={r.key} className="flex justify-between text-slate-600"><span>源泉徴収税　{r.name}</span><span className="font-bold">−{yen(r.tax)}</span></div>
               ))}
               <div className="mt-1 flex items-center justify-between border-t border-slate-300 pt-2"><span className="text-base font-black">差引お振込額</span><span className="text-lg font-black text-sky-700">{yen(totals.total - wh.taxTotal)}</span></div>
               <p className="text-[11px] leading-4 text-slate-400">※源泉徴収税は経理担当者が設定します（対象は出勤の報酬分・経費は対象外）。</p>
@@ -1694,6 +1697,7 @@ function AdminSystem({ session, profile }) {
                     <span>
                       <span className="block text-base font-black text-sky-800 underline decoration-sky-300 underline-offset-4">{r.name}</span>
                       <span className="mt-0.5 block text-xs text-slate-500">報酬 {yen(r.base)}　／　{r.entry ? whDesc(r.entry) : <b className="text-amber-600">未設定（タップして設定）</b>}{r.entry?.carried ? "　※前回の設定を引き継ぎ" : ""}</span>
+                      {otsuNeedsTable(r.entry, r.base) && <span className="mt-1 block rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700">報酬が105,000円以上です。乙欄の税額表で金額を確認して入力してください</span>}
                     </span>
                     <span className="text-right text-sm font-black">{r.entry ? `−${yen(r.tax)}` : "—"}</span>
                   </button>
@@ -1860,6 +1864,7 @@ function WithholdingModal({ row, entry, setting, onClose, onSave }) {
               {type === "otsu" && (manual
                 ? <button type="button" onClick={() => { setManual(false); setAmount(""); }} className="text-xs font-bold text-sky-700">自動計算（{yen(row.base)} × {rate}% = {yen(auto)}）に戻す</button>
                 : <p className="text-xs text-slate-500">{yen(row.base)} × {rate}% ＝ {yen(auto)}（1円未満切り捨て）。金額を直接書き換えることもできます。</p>)}
+              {type === "otsu" && !manual && row.base >= OTSU_FLAT_LIMIT && <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-bold leading-5 text-red-700">この月の報酬は105,000円以上なので、3.063%ではなく乙欄の税額表の金額になります。税額表で確認した金額を上の欄に入力してください。</p>}
               {type === "kou" && <p className="text-xs leading-5 text-slate-500">甲欄は源泉徴収税額表（月額表）で、支給額と扶養の人数から求めた金額を入力してください。入力した金額は翌月も初期値として入ります。</p>}
             </div>
           )}
