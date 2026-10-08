@@ -1,13 +1,13 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { CalendarDays, FileText, LogOut, Plus, Printer, Save, Trash2, UserPlus, Users, LayoutDashboard, TrendingUp, Wallet, Megaphone, BookOpen, ChevronLeft, Settings, KeyRound, Eye, X } from "lucide-react";
+import { CalendarDays, FileText, LogOut, Plus, Printer, Save, Trash2, UserPlus, Users, LayoutDashboard, TrendingUp, Wallet, Megaphone, BookOpen, ChevronLeft, Settings, KeyRound, Eye, X, Check, ChevronRight } from "lucide-react";
 import schools from "./schools.json";
-import { createDemoClient, resetDemo, DEMO_SCHOOL, DEMO_ADMIN, DEMO_TEACHER } from "./demo.js";
+import { createDemoClient, resetDemo, DEMO_SCHOOL, DEMO_SCHOOL2, DEMO_ADMIN, DEMO_TEACHER } from "./demo.js";
 
 // ?demo=1 で開くと、本番DBに接続しないデモ（テスト教室）で動く
 const DEMO = import.meta.env.VITE_FORCE_DEMO === "1" || (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("demo"));
-if (DEMO && !schools.some((s) => s.id === DEMO_SCHOOL.id)) schools.push(DEMO_SCHOOL);
+if (DEMO) [DEMO_SCHOOL, DEMO_SCHOOL2].forEach((d) => { if (!schools.some((s) => s.id === d.id)) schools.push(d); });
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 const supabase = DEMO ? createDemoClient() : (supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null);
@@ -17,6 +17,10 @@ function yen(value) {
 }
 function todayString() { return new Date().toISOString().slice(0, 10); }
 function monthString(date = new Date()) { return date.toISOString().slice(0, 7); }
+function shortDate(ts) { const d = new Date(ts); return Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}/${d.getDate()}`; }
+function monthLabel(m) { const [y, mm] = String(m).split("-"); return `${y}年${Number(mm)}月分`; }
+// 請求書の状態：未提出 / 振込待ち（提出済み） / 振込済み
+function invoiceState(r) { if (r && r.paid_at) return "paid"; if (r && r.status === "submitted") return "submitted"; return "unsubmitted"; }
 function uniqueId() { return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 function safeNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
 function getSchoolById(id) { return schools.find((school) => school.id === id) || schools[0]; }
@@ -478,6 +482,13 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
   const [status, setStatus] = useState("draft");
   const [submitting, setSubmitting] = useState(false);
   const [withholding, setWithholding] = useState({});
+  const [paidAt, setPaidAt] = useState(null); // 経理が「振込済み」にした日時（あれば編集不可）
+  const [myMonthRecords, setMyMonthRecords] = useState([]); // 給与明細用：同じ月の自分の他教室の請求書
+  useEffect(() => {
+    if (!supabase || status !== "submitted") { setMyMonthRecords([]); return; }
+    supabase.from("invoice_months").select("*").eq("user_id", uid).eq("target_month", targetMonth)
+      .then(({ data }) => setMyMonthRecords(data || []));
+  }, [uid, targetMonth, status]);
 
   const [students, setStudents] = useState([]);
   const [rosterPage, setRosterPage] = useState(1);
@@ -567,6 +578,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
       setActivePersonId(null);
       setStatus(data.status === "submitted" ? "submitted" : "draft");
       setWithholding(data.withholding && typeof data.withholding === "object" ? data.withholding : {});
+      setPaidAt(data.paid_at || null);
     } else {
       const defaultClassName = school.classes[0]?.name || "A";
       setPeople([makePerson(school.defaultRate, "")]);
@@ -575,11 +587,12 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
       setNotes("");
       setStatus("draft");
       setWithholding({});
+      setPaidAt(null);
     }
   }
 
   async function saveInvoice() {
-    if (!supabase || readOnly) return;
+    if (!supabase || readOnly || paidAt) return;
     setSaveMessage("保存中...");
     const mergedPeople = mergeSamePeople(people);
     const didMerge = mergedPeople.length < people.length;
@@ -604,7 +617,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
   }
 
   async function submitInvoice() {
-    if (!supabase || readOnly) return;
+    if (!supabase || readOnly || paidAt) return;
     if (!window.confirm("請求書を提出します。生徒名簿は最新の状態に更新しましたか？\nこの時点の名簿が管理者に記録されます。よろしければ「OK」を押してください。")) return;
     setSubmitting(true);
     setSaveMessage("提出中...");
@@ -844,7 +857,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {mode === "invoice" && !readOnly && <Button variant="outline" onClick={saveInvoice} className="w-full"><Save className="mr-1 h-4 w-4" />下書き保存</Button>}
+              {mode === "invoice" && !readOnly && !paidAt && <Button variant="outline" onClick={saveInvoice} className="w-full"><Save className="mr-1 h-4 w-4" />下書き保存</Button>}
               {mode === "invoice" && <Button onClick={downloadPdf} className="w-full"><FileText className="mr-1 h-4 w-4" />PDF保存</Button>}
               {mode === "invoice" && <Button variant="outline" onClick={printInvoice} className="w-full"><Printer className="mr-1 h-4 w-4" />印刷</Button>}
               {!readOnly && <Button variant="ghost" onClick={logout} className="w-full"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>}
@@ -853,11 +866,13 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
               <div className="rounded-3xl border border-emerald-100 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-bold text-slate-700">{targetMonth} の状態</span>
-                  {status === "submitted"
-                    ? <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">提出済み（管理者と共有中）</span>
+                  {paidAt
+                    ? <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-700">お振込済み（{shortDate(paidAt)}）</span>
+                    : status === "submitted"
+                    ? <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">提出済み（お振込待ち）</span>
                     : <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">下書き（未提出）</span>}
                 </div>
-                <p className="mt-2 text-xs leading-5 text-slate-500">「下書き保存」はあなただけに見えます。内容が確定したら「提出」を押すと管理者が確認できます。提出後に下書き保存すると未提出に戻るので、もう一度提出してください。</p>
+                {paidAt ? <p className="mt-2 text-xs leading-5 text-slate-500">この月の請求書はお振込が完了しているため変更できません。修正が必要な場合は経理担当までご連絡ください。</p> : <p className="mt-2 text-xs leading-5 text-slate-500">「下書き保存」はあなただけに見えます。内容が確定したら「提出」を押すと管理者が確認できます。提出後に下書き保存すると未提出に戻るので、もう一度提出してください。</p>}
                 {whCalc.hasAny && (
                   <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
                     <p className="font-bold">経理担当者が源泉徴収税を設定しました</p>
@@ -865,13 +880,14 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
                     <p className="mt-1 font-bold">お振込額は {yen(totals.total - whCalc.taxTotal)}（請求書の「差引お振込額」）です。</p>
                   </div>
                 )}
-                {!readOnly && <Button onClick={submitInvoice} disabled={submitting} className="mt-3 w-full">{status === "submitted" ? "この内容で再提出する" : "この内容で提出する（確定）"}</Button>}
+                {!readOnly && !paidAt && <Button onClick={submitInvoice} disabled={submitting} className="mt-3 w-full">{status === "submitted" ? "この内容で再提出する" : "この内容で提出する（確定）"}</Button>}
               </div>
             )}
             {saveMessage && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{saveMessage}</div>}
+            {mode === "invoice" && status === "submitted" && <PayslipButtons records={[...myMonthRecords.filter((r) => r.school_id !== schoolId), { id: "current", school_id: schoolId, status, people, expenses, withholding, target_month: targetMonth, paid_at: paidAt, roster: students }]} />}
           </div>
 
-          <fieldset disabled={readOnly} className={`min-w-0 space-y-4 ${readOnly ? "opacity-80" : ""}`}>
+          <fieldset disabled={readOnly || (mode === "invoice" && !!paidAt)} className={`min-w-0 space-y-4 ${readOnly || (mode === "invoice" && paidAt) ? "opacity-80" : ""}`}>
           {mode === "invoice" ? (
             <>
               <Card>
@@ -1578,8 +1594,10 @@ function AdminSystem({ session, profile }) {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
-  const [filterSchool, setFilterSchool] = useState("all");
-  const [filterMonth, setFilterMonth] = useState("all");
+  const [filterMonth, setFilterMonth] = useState(addMonths(monthString(), -1)); // 既定は先月分（毎月はじめに先月分が提出される）
+  const [filterState, setFilterState] = useState("all");
+  const [teacherSchools, setTeacherSchools] = useState([]);
+  const [paying, setPaying] = useState(null);
   const [roster, setRoster] = useState([]);
   const [settings, setSettings] = useState({});
   const [editing, setEditing] = useState(null); // 源泉徴収を設定中の人物 { key, name, base }
@@ -1651,25 +1669,54 @@ function AdminSystem({ session, profile }) {
     const { data, error } = await supabase
       .from("invoice_months")
       .select("*")
-      .eq("status", "submitted")
       .order("target_month", { ascending: false })
       .order("submitted_at", { ascending: false });
     if (error) setMessage("読み込みエラー：" + error.message);
     setRecords(data || []);
+    // 先生が登録している教室（未提出の判定に使う）
+    const { data: pf } = await supabase.from("profiles").select("school_id, role");
+    setTeacherSchools(Array.from(new Set((pf || []).filter((p) => p.role !== "admin" && p.school_id).map((p) => p.school_id))));
     const { data: st } = await supabase.from("fc_withholding_settings").select("*");
     setSettings(Object.fromEntries((st || []).map((r) => [r.person_key, r])));
     setLoading(false);
   }
 
+  async function setPaid(record, paid, day = null) {
+    if (!supabase) return;
+    setPaying(record.id);
+    const patch = paid ? { paid_at: day ? new Date(`${day}T12:00:00+09:00`).toISOString() : new Date().toISOString(), paid_by: session.user.id } : { paid_at: null, paid_by: null };
+    const { error } = await supabase.from("invoice_months").update(patch).eq("id", record.id);
+    setPaying(null);
+    if (error) { setMessage("振込状況の保存エラー：" + error.message); return; }
+    const next = { ...record, ...patch };
+    setRecords((prev) => prev.map((r) => (r.id === record.id ? next : r)));
+    setSelected((cur) => (cur && cur.id === record.id ? next : cur));
+  }
+
   async function logout() { await supabase.auth.signOut(); }
   const printInvoice = () => window.print();
 
-  const months = Array.from(new Set(records.map((r) => r.target_month))).sort().reverse();
-  const schoolIds = Array.from(new Set(records.map((r) => r.school_id)));
-  const filtered = records.filter((r) =>
-    (filterSchool === "all" || r.school_id === filterSchool) &&
-    (filterMonth === "all" || r.target_month === filterMonth)
-  );
+  // その月の教室ごとの状態。請求書を出したことがある教室＋先生が登録している教室を「対象」とする
+  const thisMonth = monthString();
+  const minMonth = records.reduce((m, r) => (r.target_month && r.target_month < m ? r.target_month : m), addMonths(thisMonth, -1));
+  const canPrev = filterMonth > minMonth;
+  const canNext = filterMonth < thisMonth;
+  const targetSchoolIds = Array.from(new Set([...records.map((r) => r.school_id), ...teacherSchools]))
+    .filter((id) => schools.some((s) => s.id === id))
+    .sort((a, b) => schools.findIndex((s) => s.id === a) - schools.findIndex((s) => s.id === b));
+  const monthRecords = records.filter((r) => r.target_month === filterMonth);
+  const board = [];
+  targetSchoolIds.forEach((sid) => {
+    const recs = monthRecords.filter((r) => r.school_id === sid);
+    const done = recs.filter((r) => invoiceState(r) !== "unsubmitted");
+    if (done.length) done.forEach((r) => board.push({ key: r.id, schoolId: sid, state: invoiceState(r), record: r }));
+    else board.push({ key: "none-" + sid, schoolId: sid, state: "unsubmitted", record: recs[0] || null });
+  });
+  const counts = { unsubmitted: 0, submitted: 0, paid: 0 };
+  board.forEach((b) => { counts[b.state] += 1; });
+  const order = { unsubmitted: 0, submitted: 1, paid: 2 };
+  const shown = board.filter((b) => filterState === "all" || b.state === filterState).sort((a, b) => order[a.state] - order[b.state]);
+  const unpaidTotal = board.filter((b) => b.state === "submitted").reduce((sum, b) => sum + calcTotals(b.record.people, b.record.expenses).total - calcWithholding(b.record.people, b.record.withholding).taxTotal, 0);
 
   if (selected && preview) {
     return (
@@ -1705,6 +1752,8 @@ function AdminSystem({ session, profile }) {
             </div>
             <Button onClick={() => setPreview(true)} className="w-full bg-sky-600 hover:bg-sky-700"><Eye className="mr-1 h-4 w-4" />先生からの見え方を確認</Button>
             {message && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</div>}
+            <PayBox record={selected} amount={totals.total - wh.taxTotal} busy={paying === selected.id} onPaid={(v, day) => setPaid(selected, v, day)} />
+            <PayslipButtons records={records.filter((r) => r.target_month === selected.target_month).map((r) => (r.id === selected.id && !(Array.isArray(r.roster) && r.roster.length) ? { ...r, roster } : r))} onlyKeys={(Array.isArray(selected.people) ? selected.people : []).map((p) => personKey(p.name))} />
 
             <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="h-1.5 w-20 rounded-full bg-sky-500" />
@@ -1718,7 +1767,7 @@ function AdminSystem({ session, profile }) {
                       <span className="mt-0.5 block text-xs text-slate-500">報酬 {yen(r.base)}　／　{r.entry ? whDesc(r.entry) : <b className="text-amber-600">未設定（タップして設定）</b>}{r.entry?.carried ? "　※前回の設定を引き継ぎ" : ""}</span>
                       {otsuNeedsTable(r.entry, r.base) && <span className="mt-1 block rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700">報酬が105,000円以上です。乙欄の税額表で金額を確認して入力してください</span>}
                     </span>
-                    <span className="text-right text-sm font-black">{r.entry ? `−${yen(r.tax)}` : "—"}</span>
+                    <span className="text-right"><span className="block text-sm font-black">{r.entry ? `−${yen(r.tax)}` : "—"}</span><span className="block text-xs font-bold text-sky-700">差引 {yen(r.base - r.tax)}</span></span>
                   </button>
                 ))}
               </div>
@@ -1778,49 +1827,285 @@ function AdminSystem({ session, profile }) {
         <div className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
           <div className="mb-4 h-2 w-24 rounded-full bg-gradient-to-r from-emerald-500 via-orange-400 to-pink-500" />
           <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-600">Sowers FC System｜管理者</p>
-          <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">提出された請求書</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">先生が「提出」した請求書がここに並びます（{profile.display_name || session.user.email}）。</p>
+          <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">請求書の提出・振込状況</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">月ごとに「未提出／振込待ち／振込済み」が分かります。振込が終わったら「振込済みにする」を押してください（{profile.display_name || session.user.email}）。</p>
         </div>
         <DemoEntry />
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <SelectInput value={filterSchool} onChange={setFilterSchool}>
-            <option value="all">すべての教室</option>
-            {schoolIds.map((id) => { const sc = getSchoolById(id); return <option key={id} value={id}>{sc.area}｜{sc.name}</option>; })}
-          </SelectInput>
-          <SelectInput value={filterMonth} onChange={setFilterMonth}>
-            <option value="all">すべての月</option>
-            {months.map((m) => <option key={m} value={m}>{m}</option>)}
-          </SelectInput>
-          <Button variant="outline" onClick={loadAll} className="w-full sm:w-auto">再読み込み</Button>
+        <div className="flex items-center justify-between gap-2 rounded-3xl border border-slate-200 bg-white p-2 shadow-sm">
+          <button type="button" disabled={!canPrev} onClick={() => setFilterMonth(addMonths(filterMonth, -1))} className="flex h-12 w-12 items-center justify-center rounded-2xl text-slate-600 hover:bg-slate-100 disabled:opacity-30" aria-label="前の月"><ChevronLeft className="h-6 w-6" /></button>
+          <div className="text-center">
+            <p className="text-lg font-black text-slate-900">{monthLabel(filterMonth)}</p>
+            {filterMonth === addMonths(thisMonth, -1) && <p className="text-xs font-bold text-emerald-600">今月提出してもらう月</p>}
+          </div>
+          <button type="button" disabled={!canNext} onClick={() => setFilterMonth(addMonths(filterMonth, 1))} className="flex h-12 w-12 items-center justify-center rounded-2xl text-slate-600 hover:bg-slate-100 disabled:opacity-30" aria-label="次の月"><ChevronRight className="h-6 w-6" /></button>
         </div>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            ["unsubmitted", "未提出", counts.unsubmitted, "border-red-200 bg-red-50 text-red-700", "ring-red-400"],
+            ["submitted", "振込待ち", counts.submitted, "border-amber-200 bg-amber-50 text-amber-700", "ring-amber-400"],
+            ["paid", "振込済み", counts.paid, "border-sky-200 bg-sky-50 text-sky-700", "ring-sky-400"],
+          ].map(([key, label, n, cls, ring]) => (
+            <button key={key} type="button" onClick={() => setFilterState(filterState === key ? "all" : key)} className={`rounded-3xl border p-3 text-center shadow-sm transition ${cls} ${filterState === key ? "ring-2 " + ring : ""}`}>
+              <span className="block text-xs font-bold">{label}</span>
+              <span className="block text-3xl font-black leading-tight">{n}</span>
+            </button>
+          ))}
+        </div>
+        {counts.submitted > 0 && <p className="px-1 text-right text-sm font-bold text-amber-700">振込待ちの合計 {yen(unpaidTotal)}</p>}
+        {filterState !== "all" && <button type="button" onClick={() => setFilterState("all")} className="w-full text-center text-xs font-bold text-slate-500 underline">すべて表示に戻す</button>}
         {message && <div className="rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{message}</div>}
         {loading ? (
           <div className="rounded-2xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm">読み込み中...</div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-2xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm">提出された請求書はまだありません。</div>
+        ) : shown.length === 0 ? (
+          <div className="rounded-2xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm">該当する教室はありません。</div>
         ) : (
-          <div className="space-y-3">
-            {filtered.map((r) => {
-              const school = getSchoolById(r.school_id);
+          <div className="space-y-2">
+            {shown.map((b) => {
+              const school = getSchoolById(b.schoolId);
+              const r = b.record;
+              if (b.state === "unsubmitted") {
+                return (
+                  <div key={b.key} className="flex items-center justify-between gap-3 rounded-3xl border border-red-200 bg-white p-4 shadow-sm">
+                    <div className="min-w-0">
+                      <p className="text-base font-black text-slate-900">{school.area}｜{school.name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{r ? "先生が下書き中です（まだ提出されていません）" : "まだ請求書がありません"}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-red-100 px-3 py-1 text-sm font-black text-red-700">未提出</span>
+                  </div>
+                );
+              }
               const totals = calcTotals(r.people, r.expenses);
               const whr = calcWithholding(r.people, r.withholding);
               const unset = whr.rows.filter((x) => !x.entry && !settings[x.key]).length;
-              const submitted = r.submitted_at ? String(r.submitted_at).slice(0, 10) : "";
+              const paid = b.state === "paid";
+              const resubmitted = paid && r.submitted_at && new Date(r.submitted_at) > new Date(r.paid_at);
               return (
-                <div key={r.id} className="grid grid-cols-1 gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center">
-                  <div>
-                    <p className="text-base font-black text-slate-900">{school.area}｜{school.name}</p>
-                    <p className="mt-1 text-sm text-slate-600">対象月 {r.target_month} ／ 請求者 {r.issuer || "未入力"}</p>
-                    <p className="mt-1 text-sm font-bold text-emerald-700">請求金額 {yen(totals.total)}{submitted ? "　提出日 " + submitted : ""}</p>
-                    <p className="mt-1 text-xs font-bold text-slate-500">源泉 −{yen(whr.taxTotal)}　差引お振込額 <span className="text-sky-700">{yen(totals.total - whr.taxTotal)}</span>{unset ? <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">源泉未設定 {unset}名</span> : null}</p>
+                <div key={b.key} className={`rounded-3xl border bg-white p-4 shadow-sm ${paid ? "border-sky-200" : "border-amber-300"}`}>
+                  <button type="button" onClick={() => setSelected(r)} className="flex w-full items-start justify-between gap-3 text-left">
+                    <span className="min-w-0">
+                      <span className="block text-base font-black text-slate-900">{school.area}｜{school.name}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">{r.issuer || "請求者未入力"}{r.submitted_at ? "　提出 " + shortDate(r.submitted_at) : ""}</span>
+                      <span className="mt-1 block text-lg font-black text-slate-900">{yen(totals.total - whr.taxTotal)}<span className="ml-1 text-xs font-bold text-slate-500">振込額</span></span>
+                      {unset ? <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">源泉未設定 {unset}名</span> : null}
+                      {resubmitted ? <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">振込後に再提出あり・要確認</span> : null}
+                    </span>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-black ${paid ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>{paid ? `振込済み ${shortDate(r.paid_at)}` : "振込待ち"}</span>
+                  </button>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Button variant="outline" onClick={() => setSelected(r)} className="w-full"><FileText className="mr-1 h-4 w-4" />開いて確認</Button>
+                    {paid
+                      ? <Button variant="ghost" disabled={paying === r.id} onClick={() => setPaid(r, false)} className="w-full border border-slate-200 text-sm">振込済みを取り消す</Button>
+                      : <Button disabled={paying === r.id} onClick={() => setPaid(r, true)} className="w-full whitespace-nowrap bg-sky-600 px-2 text-sm hover:bg-sky-700"><Check className="mr-1 h-4 w-4" />振込済みにする</Button>}
                   </div>
-                  <Button onClick={() => setSelected(r)} className="w-full sm:w-auto"><FileText className="mr-1 h-4 w-4" />開いて確認</Button>
                 </div>
               );
             })}
           </div>
         )}
+        {!loading && <PayslipButtons records={monthRecords} title={`給与明細書（${monthLabel(filterMonth)}）`} />}
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={loadAll} className="flex-1">再読み込み</Button>
+          <Button variant="ghost" onClick={logout} className="flex-1"><LogOut className="mr-1 h-4 w-4" />ログアウト</Button>
+        </div>
       </div>
+    </div>
+  );
+}
+
+
+function classKey(name) { return String(name || "").replace(/[\s　]+/g, "").replace(/クラス/g, ""); }
+// メインのクラスの在籍人数（提出時の名簿。クラス名は出勤内容→クラス欄の順で名簿と照合）
+function mainClassCount(work, roster) {
+  const isMain = work.role === "main" || /メイン/.test(work.workDetail || "");
+  if (!isMain || !Array.isArray(roster) || !roster.length) return null;
+  const active = roster.filter((s) => (s.status || "active") === "active");
+  const cands = [classKey(String(work.workDetail || "").replace(/\s*(メイン|サブ)\s*$/, "")), classKey(work.className)].filter(Boolean);
+  for (const c of cands) {
+    const n = active.filter((s) => classKey(s.class_name) === c).length;
+    if (n) return n;
+  }
+  return null;
+}
+// ===== 給与明細書（1人×1か月。複数の教室の請求書をまとめる）=====
+// 経費の行のうち、マイナスで施設関係でないもの＝先生が現金で受け取った分（給与から差し引く）
+function isHandedCash(e) {
+  const sub = safeNumber(e.quantity) * safeNumber(e.amount);
+  return sub < 0 && !/(施設|利用料|返金|会場|体育館|公民館|交通|駐車)/.test(String(e.item || ""));
+}
+function jpDate(ts) { const t = new Date(ts); return Number.isNaN(t.getTime()) ? "" : `${t.getFullYear()}年${t.getMonth() + 1}月${t.getDate()}日`; }
+function buildPayslip(records, key) {
+  const list = (records || []).filter((r) => (Array.isArray(r.people) ? r.people : []).some((p) => personKey(p.name) === key))
+    .sort((a, b) => schools.findIndex((x) => x.id === a.school_id) - schools.findIndex((x) => x.id === b.school_id));
+  let name = "";
+  const blocks = list.map((r) => {
+    const person = mergeSamePeople(r.people).find((p) => personKey(p.name) === key);
+    name = name || person.name;
+    const roster = Array.isArray(r.roster) ? r.roster : [];
+    const works = (person.works || []).filter((w) => (w.dates || []).length).map((w) => ({
+      ...w, days: w.dates.length, amount: w.dates.length * safeNumber(w.rate),
+      isMain: w.role === "main" || /メイン/.test(w.workDetail || ""), students: mainClassCount(w, roster),
+    }));
+    const pay = works.reduce((sum, w) => sum + w.amount, 0);
+    const wh = r.withholding && typeof r.withholding === "object" ? r.withholding[key] : null;
+    const handed = (Array.isArray(r.expenses) ? r.expenses : []).filter((e) => personKey(e.applicant) === key && isHandedCash(e))
+      .map((e) => ({ id: e.id, label: `手渡しで受け取った分（${e.item || "現金"}${safeNumber(e.quantity) > 1 ? ` ${e.quantity}名分` : ""}）`, amount: -safeNumber(e.quantity) * safeNumber(e.amount) }));
+    return { record: r, school: getSchoolById(r.school_id), works, pay, tax: whTax(wh, pay), handed, days: Array.from(new Set(works.flatMap((w) => w.dates))).sort() };
+  });
+  const pay = blocks.reduce((sum, b) => sum + b.pay, 0);
+  const tax = blocks.reduce((sum, b) => sum + b.tax, 0);
+  const handed = blocks.flatMap((b) => b.handed.map((h) => ({ ...h, school: b.school })));
+  const handedTotal = handed.reduce((sum, h) => sum + h.amount, 0);
+  const allPaid = list.length && list.every((r) => r.paid_at);
+  const payDay = allPaid ? jpDate(list.map((r) => r.paid_at).sort().slice(-1)[0]) : "";
+  return { key, name: name || "（氏名未入力）", month: list[0]?.target_month || "", blocks, pay, tax, handed, handedTotal, deductTotal: tax + handedTotal, net: pay - tax - handedTotal, payDay, multi: blocks.length > 1 };
+}
+
+function PayslipSheet({ slip }) {
+  const [y, m] = String(slip.month).split("-");
+  const cell = "border border-slate-300 px-3 py-2";
+  const head = "border border-slate-300 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-800";
+  return (
+    <div id="payslip-pdf-area" className="mx-auto w-full max-w-[720px] bg-white p-6 text-slate-900 sm:p-10" style={{ fontFeatureSettings: '"palt"' }}>
+      <div className="flex items-end justify-between border-b-4 border-emerald-600 pb-3">
+        <div>
+          <p className="text-[11px] font-bold tracking-[0.3em] text-emerald-600">SOWERS PAYSLIP</p>
+          <h2 className="mt-1 text-3xl font-black tracking-[0.3em]">給与明細書</h2>
+        </div>
+        <p className="text-lg font-black">{y}年{Number(m)}月分</p>
+      </div>
+
+      <div className="mt-5 grid grid-cols-[1fr_auto] items-end gap-4">
+        <div>
+          <p className="inline-block border-b border-slate-400 pb-1 pr-10 text-2xl font-black">{slip.name}　様</p>
+          <p className="mt-2 text-sm text-slate-600">{slip.blocks.map((b) => `${b.school.area}｜${b.school.name}`).join("　/　")}</p>
+        </div>
+        <div className="text-right text-xs leading-5 text-slate-600">
+          <p className="text-sm">支給日：<b className="text-slate-900">{slip.payDay || "お振込後に記載"}</b></p>
+          <p className="font-bold text-slate-900">Sowers株式会社</p>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl border-2 border-emerald-600 p-4 text-center">
+        <p className="text-xs font-bold text-emerald-700">差引支給額</p>
+        <p className="text-4xl font-black tracking-tight">{yen(slip.net)}</p>
+      </div>
+
+      <p className="mt-6 mb-1.5 text-sm font-black">勤怠</p>
+      <table className="w-full border-collapse text-sm">
+        <tbody>
+          {slip.blocks.map((b) => (
+            <React.Fragment key={b.record.id || b.school.id}>
+              <tr><td className={head} colSpan={2}>{b.school.name}</td></tr>
+              <tr><td className={`${cell} w-1/3 bg-slate-50 text-slate-600`}>出勤日数</td><td className={`${cell} text-right font-bold`}>{b.days.length}日</td></tr>
+              <tr><td className={`${cell} bg-slate-50 text-slate-600`}>出勤日</td><td className={`${cell} text-xs leading-5`}>{b.days.length ? b.days.map(formatJapaneseDate).join("、") : "—"}</td></tr>
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+
+      <p className="mt-5 mb-1.5 text-sm font-black">支給</p>
+      <table className="w-full border-collapse text-sm">
+        <thead><tr className="bg-slate-50 text-xs text-slate-600"><th className={`${cell} text-left`}>内容</th><th className={`${cell} w-16 text-right`}>回数</th><th className={`${cell} w-24 text-right`}>単価</th><th className={`${cell} w-28 text-right`}>金額</th></tr></thead>
+        <tbody>
+          {slip.blocks.map((b) => (
+            <React.Fragment key={b.record.id || b.school.id}>
+              {slip.multi && <tr><td className={head} colSpan={4}>{b.school.name}</td></tr>}
+              {b.works.map((w) => (
+                <tr key={w.id}><td className={cell}>{w.workDetail}{w.isMain && <span className="ml-1 text-xs text-slate-500">（生徒 {w.students ?? "—"}名）</span>}</td><td className={`${cell} text-right`}>{w.days}</td><td className={`${cell} text-right`}>{yen(w.rate)}</td><td className={`${cell} text-right font-bold`}>{yen(w.amount)}</td></tr>
+              ))}
+            </React.Fragment>
+          ))}
+          <tr className="bg-slate-50"><td className={`${cell} font-black`} colSpan={3}>支給合計</td><td className={`${cell} text-right font-black`}>{yen(slip.pay)}</td></tr>
+        </tbody>
+      </table>
+
+      <p className="mt-5 mb-1.5 text-sm font-black">控除</p>
+      <table className="w-full border-collapse text-sm">
+        <tbody>
+          <tr><td className={cell}>源泉所得税</td><td className={`${cell} w-28 text-right font-bold`}>{yen(slip.tax)}</td></tr>
+          {slip.handed.map((h) => (
+            <tr key={h.id}><td className={cell}>{h.label}{slip.multi ? `　${h.school.name}` : ""}</td><td className={`${cell} text-right font-bold`}>{yen(h.amount)}</td></tr>
+          ))}
+          <tr className="bg-slate-50"><td className={`${cell} font-black`}>控除合計</td><td className={`${cell} text-right font-black`}>{yen(slip.deductTotal)}</td></tr>
+        </tbody>
+      </table>
+
+      <div className="mt-5 flex items-center justify-between border-y-2 border-slate-900 py-3">
+        <span className="text-base font-black">差引支給額</span>
+        <span className="text-2xl font-black">{yen(slip.net)}</span>
+      </div>
+      <p className="mt-3 text-[11px] leading-5 text-slate-500">※源泉所得税は支給合計にかかります。経費の精算分はこの明細書に含みません。</p>
+    </div>
+  );
+}
+
+// 明細書を開くポップアップ（PDFで保存）
+function PayslipModal({ slip, onClose }) {
+  const [msg, setMsg] = useState("");
+  const file = `給与明細_${slip.month}_${slip.key || "氏名未入力"}.pdf`;
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 p-3 sm:p-6 print:hidden">
+      <div className="mx-auto max-w-[760px] space-y-3">
+        <div className="sticky top-0 z-10 grid grid-cols-2 gap-2 rounded-2xl bg-white p-2 shadow">
+          <Button onClick={() => exportElementAsLongPdf("payslip-pdf-area", file, setMsg)} className="w-full"><FileText className="mr-1 h-4 w-4" />PDFで保存</Button>
+          <Button variant="outline" onClick={onClose} className="w-full"><X className="mr-1 h-4 w-4" />閉じる</Button>
+        </div>
+        {msg && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{msg}</div>}
+        <div className="overflow-hidden rounded-2xl shadow-lg"><PayslipSheet slip={slip} /></div>
+      </div>
+    </div>
+  );
+}
+
+// 人ごとの「明細書」ボタン一覧。records＝その月の請求書（複数教室）、onlyKeys＝表示する人を絞る
+function PayslipButtons({ records, onlyKeys = null, title = "給与明細書" }) {
+  const [open, setOpen] = useState(null);
+  const done = (records || []).filter((r) => r && (r.status === "submitted" || r.paid_at));
+  const keys = [];
+  done.forEach((r) => (Array.isArray(r.people) ? r.people : []).forEach((p) => {
+    const k = personKey(p.name);
+    if (k && !keys.includes(k) && (p.works || []).some((w) => (w.dates || []).length) && (!onlyKeys || onlyKeys.includes(k))) keys.push(k);
+  }));
+  if (!keys.length) return null;
+  const slips = keys.map((k) => buildPayslip(done, k));
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="h-1.5 w-20 rounded-full bg-emerald-500" />
+      <h2 className="mt-3 text-lg font-black">{title}</h2>
+      <p className="mt-1 text-xs leading-5 text-slate-500">名前をタップすると明細書を開いてPDFで保存できます。複数の教室を担当している人は1枚にまとまります。</p>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {slips.map((sl) => (
+          <button key={sl.key} type="button" onClick={() => setOpen(sl)} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50">
+            <span className="min-w-0"><span className="block font-black">{sl.name}</span>{sl.multi && <span className="block text-xs text-slate-500">{sl.blocks.length}教室</span>}</span>
+            <span className="text-sm font-bold text-emerald-700">{yen(sl.net)}</span>
+          </button>
+        ))}
+      </div>
+      {open && <PayslipModal slip={open} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+// 請求書詳細の「振込状況」ボックス（経理担当者用）
+function PayBox({ record, amount, busy, onPaid }) {
+  const [payDate, setPayDate] = useState(todayString());
+  const state = invoiceState(record);
+  if (state === "unsubmitted") return null;
+  const paid = state === "paid";
+  return (
+    <div className={`rounded-3xl border p-4 shadow-sm ${paid ? "border-sky-200 bg-sky-50" : "border-amber-300 bg-amber-50"}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-bold text-slate-700">振込状況</span>
+        <span className={`rounded-full px-3 py-1 text-sm font-black ${paid ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>{paid ? `振込済み（${shortDate(record.paid_at)}）` : "振込待ち"}</span>
+      </div>
+      <p className="mt-2 text-sm">差引お振込額 <b className="text-lg">{yen(amount)}</b></p>
+      {paid
+        ? <Button variant="ghost" disabled={busy} onClick={() => onPaid(false)} className="mt-3 w-full border border-slate-200 text-sm">振込済みを取り消す</Button>
+        : <>
+            <label className="mt-3 flex items-center justify-between gap-2 text-sm"><span className="font-bold text-slate-700">支給日（振込日）</span><input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2" /></label>
+            <Button disabled={busy || !payDate} onClick={() => onPaid(true, payDate)} className="mt-2 w-full bg-sky-600 hover:bg-sky-700"><Check className="mr-1 h-4 w-4" />振込済みにする</Button>
+          </>}
+      <p className="mt-2 text-xs leading-5 text-slate-500">振込済みにすると、先生の画面にも「お振込済み」と表示され、その月の請求書は先生側で変更できなくなります。</p>
     </div>
   );
 }

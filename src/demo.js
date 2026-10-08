@@ -11,6 +11,16 @@ export const DEMO_SCHOOL = {
   classes: [{ name: "A", time: "10:00-11:00" }, { name: "B", time: "11:10-12:10" }],
 };
 
+export const DEMO_SCHOOL2 = {
+  id: "demo-test2",
+  area: "テスト",
+  name: "テスト第2教室（デモ・未提出）",
+  day: "日曜（月3回）",
+  venue: "テスト公民館",
+  defaultRate: 1200,
+  classes: [{ name: "A", time: "10:00-11:00" }],
+};
+
 export const DEMO_ADMIN = { id: "demo-admin", display_name: "経理担当（デモ）", school_id: null, role: "admin" };
 export const DEMO_TEACHER = { id: "demo-teacher", display_name: "テスト 先生", school_id: "demo-test", role: "teacher" };
 
@@ -39,7 +49,7 @@ function seed() {
   };
   const aug = {
     ...base, id: rid("inv"), target_month: "2026-08", invoice_date: "2026-08-31", invoice_no: "SW-20260831",
-    submitted_at: "2026-08-31T12:00:00Z", updated_at: "2026-08-31T12:00:00Z",
+    submitted_at: "2026-08-31T12:00:00Z", updated_at: "2026-08-31T12:00:00Z", paid_at: "2026-09-25T03:00:00Z",
     people: [
       { id: rid("p"), name: "テスト 花子", works: [work("A", "main", ["2026-08-01", "2026-08-08", "2026-08-22", "2026-08-29"], 2500)] },
       { id: rid("p"), name: "テスト 太郎", works: [work("B", "main", ["2026-08-01", "2026-08-08", "2026-08-22", "2026-08-29"], 2500), work("A", "sub", ["2026-08-01", "2026-08-08"], 1100)] },
@@ -76,7 +86,7 @@ function seed() {
       { person_key: "テスト花子", person_name: "テスト 花子", type: "kou", rate: 3.063, kou_amount: 0, updated_at: "2026-08-31T13:00:00Z" },
       { person_key: "テスト太郎", person_name: "テスト 太郎", type: "otsu", rate: 3.063, kou_amount: null, updated_at: "2026-08-31T13:00:00Z" },
     ],
-    profiles: [DEMO_ADMIN, DEMO_TEACHER],
+    profiles: [DEMO_ADMIN, DEMO_TEACHER, { id: "demo-teacher2", display_name: "テスト 次郎", school_id: "demo-test2", role: "teacher" }],
   };
 }
 
