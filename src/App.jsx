@@ -1725,7 +1725,7 @@ function AdminSystem({ session, profile }) {
         profile={{ display_name: selected.issuer || "先生", school_id: selected.school_id, role: "teacher" }}
         setProfile={() => {}}
         viewAs={{ userId: selected.user_id, schoolId: selected.school_id, targetMonth: selected.target_month }}
-        onExitPreview={() => setPreview(null)}
+        onExitPreview={() => { if (preview === "list") setSelected(null); setPreview(null); }}
       />
     );
   }
@@ -1869,6 +1869,7 @@ function AdminSystem({ session, profile }) {
                     <div className="min-w-0">
                       <p className="text-base font-black text-slate-900">{school.area}｜{school.name}</p>
                       <p className="mt-0.5 text-xs text-slate-500">{r ? "先生が下書き中です（まだ提出されていません）" : "まだ請求書がありません"}</p>
+                      {r && <button type="button" onClick={() => { setSelected(r); setPreview("list"); }} className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-sky-700 underline"><Eye className="h-3.5 w-3.5" />先生からの見え方を確認</button>}
                     </div>
                     <span className="shrink-0 rounded-full bg-red-100 px-3 py-1 text-sm font-black text-red-700">未提出</span>
                   </div>
@@ -1897,6 +1898,7 @@ function AdminSystem({ session, profile }) {
                       ? <Button variant="ghost" disabled={paying === r.id} onClick={() => setPaid(r, false)} className="w-full border border-slate-200 text-sm">振込済みを取り消す</Button>
                       : <Button disabled={paying === r.id} onClick={() => setPaid(r, true)} className="w-full whitespace-nowrap bg-sky-600 px-2 text-sm hover:bg-sky-700"><Check className="mr-1 h-4 w-4" />振込済みにする</Button>}
                   </div>
+                  <button type="button" onClick={() => { setSelected(r); setPreview("list"); }} className="mt-2 flex w-full items-center justify-center gap-1 rounded-2xl py-2 text-sm font-bold text-sky-700 hover:bg-sky-50"><Eye className="h-4 w-4" />先生からの見え方を確認</button>
                 </div>
               );
             })}
