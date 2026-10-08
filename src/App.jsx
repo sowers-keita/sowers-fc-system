@@ -91,6 +91,19 @@ const STUDENT_STATUSES = [
 function studentStatusLabel(status) {
   return (STUDENT_STATUSES.find((s) => s.value === (status || "active")) || STUDENT_STATUSES[0]).label;
 }
+// 同じ名前（空白の違いは無視）の人が複数いたら1人にまとめ、クラス（出勤行）をその人の下に並べる
+function mergeSamePeople(list) {
+  const out = [];
+  const byKey = {};
+  (list || []).forEach((person) => {
+    const key = personKey(person.name);
+    if (!key) { out.push(person); return; }
+    if (byKey[key]) { byKey[key].works = [...(byKey[key].works || []), ...(person.works || [])]; return; }
+    byKey[key] = { ...person, works: [...(person.works || [])] };
+    out.push(byKey[key]);
+  });
+  return out;
+}
 function personSubtotal(person) {
   return person.works.reduce((sum, work) => sum + work.dates.length * safeNumber(work.rate), 0);
 }
@@ -549,7 +562,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
       setIssuer(data.issuer || profile.display_name || "");
       setBankInfo(data.bank_info || "");
       setNotes(data.notes || "");
-      setPeople(Array.isArray(data.people) && data.people.length ? data.people : [makePerson(school.defaultRate, "")]);
+      setPeople(Array.isArray(data.people) && data.people.length ? mergeSamePeople(data.people) : [makePerson(school.defaultRate, "")]);
       setExpenses(Array.isArray(data.expenses) && data.expenses.length ? data.expenses : [makeExpenseRow()]);
       setActivePersonId(null);
       setStatus(data.status === "submitted" ? "submitted" : "draft");
@@ -568,6 +581,9 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
   async function saveInvoice() {
     if (!supabase || readOnly) return;
     setSaveMessage("保存中...");
+    const mergedPeople = mergeSamePeople(people);
+    const didMerge = mergedPeople.length < people.length;
+    if (didMerge) { setPeople(mergedPeople); setActivePersonId(mergedPeople[0]?.id || null); }
     const payload = {
       user_id: session.user.id,
       school_id: schoolId,
@@ -577,13 +593,13 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
       issuer,
       bank_info: bankInfo,
       notes,
-      people,
+      people: mergedPeople,
       expenses,
       status: "draft",
       updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from("invoice_months").upsert(payload, { onConflict: "user_id,school_id,target_month" });
-    setSaveMessage(error ? `保存エラー：${error.message}` : `${targetMonth} 分を保存しました（同じ月は上書きされます）。`);
+    setSaveMessage(error ? `保存エラー：${error.message}` : `${targetMonth} 分を保存しました（同じ月は上書きされます）。${didMerge ? "同じ名前の方は1人にまとめました。" : ""}`);
     if (!error) { setStatus("draft"); loadSavedMonths(); }
   }
 
@@ -592,6 +608,9 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
     if (!window.confirm("請求書を提出します。生徒名簿は最新の状態に更新しましたか？\nこの時点の名簿が管理者に記録されます。よろしければ「OK」を押してください。")) return;
     setSubmitting(true);
     setSaveMessage("提出中...");
+    const mergedPeople = mergeSamePeople(people);
+    const didMerge = mergedPeople.length < people.length;
+    if (didMerge) { setPeople(mergedPeople); setActivePersonId(mergedPeople[0]?.id || null); }
     const payload = {
       user_id: session.user.id,
       school_id: schoolId,
@@ -601,7 +620,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
       issuer,
       bank_info: bankInfo,
       notes,
-      people,
+      people: mergedPeople,
       expenses,
       roster: (students || []).map((s) => ({ id: s.id, full_name: s.full_name, class_name: s.class_name, join_month: s.join_month, status: s.status, page_no: s.page_no })),
       status: "submitted",
@@ -612,7 +631,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
     setSubmitting(false);
     if (error) { setSaveMessage("提出エラー：" + error.message); return; }
     setStatus("submitted");
-    setSaveMessage(targetMonth + " 分を提出しました。管理者が確認できます。");
+    setSaveMessage(targetMonth + " 分を提出しました。管理者が確認できます。" + (didMerge ? "同じ名前の方は1人にまとめました。" : ""));
     loadSavedMonths();
   }
 
