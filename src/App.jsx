@@ -31,8 +31,9 @@ function formatDate(date) {
   return `${y}-${m}-${d}`;
 }
 function formatJapaneseDate(dateText) {
-  const [, month, day] = dateText.split("-");
-  return `${Number(month)}/${Number(day)}`;
+  const [year, month, day] = dateText.split("-").map(Number);
+  const w = "日月火水木金土"[new Date(year, month - 1, day).getDay()];
+  return `${month}/${day}（${w}）`;
 }
 function addMonths(monthText, diff) {
   const [year, month] = monthText.split("-").map(Number);
@@ -78,6 +79,23 @@ function usesEnrollRule(schoolId) { return !FLAT_RATE_SCHOOLS.includes(schoolId)
 function normClass(name) { return String(name || "").replace(/\s+/g, "").replace(/クラス$/, ""); }
 function countClassStudents(students, className) { const k = normClass(className); return (students || []).filter((s) => (s.status || "active") === "active" && normClass(s.class_name) === k).length; }
 function mainRateFor(count) { return MAIN_BASE_RATE + Math.max(0, count - MAIN_BASE_COUNT) * MAIN_STEP; }
+const RATE_CHECK_FROM = "2026-10";
+function monthlyClassCount(schoolId) { return String(schoolId || "").startsWith("hombu-") ? 4 : 3; } // 本部教室は月4回、それ以外は月3回 // この月の請求から、メイン単価がルールと違う場合に報告を求める
+// 以前のデータ（役割・クラス未設定）の行を、メイン/サブ＋クラスに読み替える
+function upgradeLegacyWorks(list, school, students) {
+  const keyOf = (v) => String(v || "").replace(/[\s\u3000]+/g, "").replace(/クラス/g, "");
+  return (list || []).map((person) => ({ ...person, works: (person.works || []).map((w) => {
+    if (w.role) return w;
+    const d = String(w.workDetail || "");
+    const role = /メイン/.test(d) ? "main" : /サブ/.test(d) ? "sub" : null;
+    if (!role) return w;
+    const base = keyOf(d.replace(/\s*(メイン|サブ)\s*$/, ""));
+    const hit = school.classes.find((c) => keyOf(c.name) === base) || school.classes.find((c) => keyOf(c.name) === keyOf(w.className));
+    const next = { ...w, role, className: hit ? hit.name : "" };
+    if (role === "main" && hit && safeNumber(w.rate) !== mainRateFor(countClassStudents(students, hit.name))) next.rateManual = true;
+    return next;
+  }) }));
+}
 function workLabel(className, role) { return `${className}クラス ${role === "sub" ? "サブ" : "メイン"}`; }
 function newWorkFor(school) {
   const cls = school.classes[0]?.name || "A";
@@ -483,6 +501,8 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
   const [submitting, setSubmitting] = useState(false);
   const [withholding, setWithholding] = useState({});
   const [paidAt, setPaidAt] = useState(null); // 経理が「振込済み」にした日時（あれば編集不可）
+  const [rateReport, setRateReport] = useState(null); // { personId, workId } 単価の報告ポップアップ
+  const [countCheck, setCountCheck] = useState(null); // 月3回と違うクラスの確認ポップアップ
   const [myMonthRecords, setMyMonthRecords] = useState([]); // 給与明細用：同じ月の自分の他教室の請求書
   useEffect(() => {
     if (!supabase || status !== "submitted") { setMyMonthRecords([]); return; }
@@ -529,7 +549,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
     setPeople((prev) => {
       let changed = false;
       const next = prev.map((person) => ({ ...person, works: person.works.map((work) => {
-        if (work.role !== "main") return work;
+        if (work.role !== "main" || work.rateManual) return work;
         const rate = mainRateFor(countClassStudents(students, work.className));
         if (safeNumber(work.rate) === rate) return work;
         changed = true;
@@ -573,7 +593,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
       setIssuer(data.issuer || profile.display_name || "");
       setBankInfo(data.bank_info || "");
       setNotes(data.notes || "");
-      setPeople(Array.isArray(data.people) && data.people.length ? mergeSamePeople(data.people) : [makePerson(school.defaultRate, "")]);
+      setPeople(Array.isArray(data.people) && data.people.length ? (usesEnrollRule(schoolId) && targetMonth >= RATE_CHECK_FROM && data.status !== "submitted" && !data.paid_at ? upgradeLegacyWorks(mergeSamePeople(data.people), school, students) : mergeSamePeople(data.people)) : [makePerson(school.defaultRate, "")]);
       setExpenses(Array.isArray(data.expenses) && data.expenses.length ? data.expenses : [makeExpenseRow()]);
       setActivePersonId(null);
       setStatus(data.status === "submitted" ? "submitted" : "draft");
@@ -616,8 +636,27 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
     if (!error) { setStatus("draft"); loadSavedMonths(); }
   }
 
-  async function submitInvoice() {
+  async function submitInvoice(opts) {
     if (!supabase || readOnly || paidAt) return;
+    const countOk = !!(opts && opts.countOk === true);
+    if (enrollRule && targetMonth >= RATE_CHECK_FROM) {
+      for (const person of people) {
+        for (const work of person.works || []) {
+          if (work.role !== "main" || !(work.dates || []).length) continue;
+          if (!work.className) { setActivePersonId(person.id); setSaveMessage(`${person.name || "先生"}さんの「${work.workDetail || "メイン"}」のクラスを選んでから提出してください。`); return; }
+          if (needsRateReport(work) && !String(work.rateNote || "").trim()) { setActivePersonId(person.id); setRateReport({ personId: person.id, workId: work.id }); return; }
+        }
+      }
+    }
+    // 各クラスの月の回数（本部教室は月4回、それ以外は月3回）と違う行を確認（はい／いいえ）
+    const expectN = monthlyClassCount(schoolId);
+    if (!countOk) {
+      const odd = [];
+      people.forEach((person) => (person.works || []).forEach((work) => {
+        if ((work.role === "main" || work.role === "sub") && (work.dates || []).length && work.dates.length !== expectN) odd.push({ key: person.id + work.id, name: person.name, detail: work.workDetail, n: work.dates.length });
+      }));
+      if (odd.length) { setCountCheck(odd); return; }
+    }
     if (!window.confirm("請求書を提出します。生徒名簿は最新の状態に更新しましたか？\nこの時点の名簿が管理者に記録されます。よろしければ「OK」を押してください。")) return;
     setSubmitting(true);
     setSaveMessage("提出中...");
@@ -671,7 +710,7 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
     }));
     const copiedExpenses = (data.expenses || []).map((expense) => ({ ...expense, id: uniqueId(), amount: "", quantity: expense.quantity || 1 }));
 
-    setPeople(copiedPeople.length ? copiedPeople : [makePerson(school.defaultRate, "")]);
+    setPeople(copiedPeople.length ? (usesEnrollRule(schoolId) ? upgradeLegacyWorks(copiedPeople, school, students) : copiedPeople) : [makePerson(school.defaultRate, "")]);
     setExpenses(copiedExpenses.length ? copiedExpenses : [makeExpenseRow()]);
     setIssuer(data.issuer || issuer);
     setBankInfo(data.bank_info || bankInfo);
@@ -749,11 +788,19 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
   const changeWorkRole = (personId, work, role) => {
     if (!role) return;
     const cls = work.className || school.classes[0]?.name || "A";
-    updateWorkFields(personId, work.id, { role, className: cls, rate: role === "sub" ? SUB_DEFAULT_RATE : mainRateFor(countClassStudents(students, cls)), workDetail: workLabel(cls, role) });
+    updateWorkFields(personId, work.id, { role, className: cls, rate: role === "sub" ? SUB_DEFAULT_RATE : mainRateFor(countClassStudents(students, cls)), workDetail: workLabel(cls, role), rateManual: false, rateNote: "" });
   };
   const changeWorkClass = (personId, work, className) => {
     if (!className) return;
-    updateWorkFields(personId, work.id, { className, workDetail: workLabel(className, work.role), ...(work.role === "main" ? { rate: mainRateFor(countClassStudents(students, className)) } : {}) });
+    updateWorkFields(personId, work.id, { className, workDetail: workLabel(className, work.role), ...(work.role === "main" ? { rate: mainRateFor(countClassStudents(students, className)), rateManual: false, rateNote: "" } : {}) });
+  };
+  const ruleRateOf = (work) => mainRateFor(countClassStudents(students, work.className));
+  const needsRateReport = (work) => enrollRule && targetMonth >= RATE_CHECK_FROM && work.role === "main" && work.className && safeNumber(work.rate) !== ruleRateOf(work);
+  // 単価の入力が終わったとき：ルールと同じなら自動に戻す、違えば報告ポップアップ
+  const finishRateInput = (personId, work) => {
+    if (!enrollRule || work.role !== "main") return;
+    if (safeNumber(work.rate) === ruleRateOf(work)) { updateWorkFields(personId, work.id, { rateManual: false, rateNote: "" }); return; }
+    if (needsRateReport(work)) setRateReport({ personId, workId: work.id });
   };
   const addPerson = () => {
     const defaultClassName = school.classes[0]?.name || "A";
@@ -884,6 +931,30 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
               </div>
             )}
             {saveMessage && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{saveMessage}</div>}
+            {countCheck && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+                <div className="w-full max-w-md space-y-3 rounded-3xl bg-white p-5 shadow-xl">
+                  <p className="text-lg font-black">出勤回数に間違いはありませんか？</p>
+                  <p className="text-xs leading-5 text-slate-500">この教室の各クラスは基本、月{monthlyClassCount(schoolId)}回です。次のクラスが{monthlyClassCount(schoolId)}回ではありません。</p>
+                  <div className="space-y-1 rounded-2xl bg-slate-50 p-3 text-sm">
+                    {countCheck.map((r) => <p key={r.key}>{r.name}：{r.detail}　<b className="text-amber-700">{r.n}回</b></p>)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button onClick={() => { setCountCheck(null); submitInvoice({ countOk: true }); }} className="w-full">はい（このまま提出）</Button>
+                    <Button variant="outline" onClick={() => setCountCheck(null)} className="w-full">いいえ（直す）</Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {rateReport && (() => {
+              const person = people.find((x) => x.id === rateReport.personId);
+              const work = person?.works.find((x) => x.id === rateReport.workId);
+              if (!work) return null;
+              return <RateReportModal work={work} personName={person.name} count={countClassStudents(students, work.className)} rule={ruleRateOf(work)}
+                onClose={() => setRateReport(null)}
+                onReset={() => { updateWorkFields(person.id, work.id, { rate: ruleRateOf(work), rateManual: false, rateNote: "" }); setRateReport(null); }}
+                onSave={(note) => { updateWorkFields(person.id, work.id, { rateManual: true, rateNote: note }); setRateReport(null); setSaveMessage("単価の報告を入力しました。保存または提出で経理担当に届きます。"); }} />;
+            })()}
             {mode === "invoice" && status === "submitted" && <PayslipButtons records={[...myMonthRecords.filter((r) => r.school_id !== schoolId), { id: "current", school_id: schoolId, status, people, expenses, withholding, target_month: targetMonth, paid_at: paidAt, roster: students }]} />}
           </div>
 
@@ -1018,11 +1089,25 @@ function MainSystem({ session, profile, setProfile, viewAs = null, onExitPreview
                                   </button>
                                 </div>
                                 <div className="space-y-1">
-                                  <FieldLabel>{enrollRule && work.role === "main" ? "1日単価（自動）" : "1日単価"}</FieldLabel>
-                                  <TextInput type="number" value={work.rate} readOnly={enrollRule && work.role === "main"} className={enrollRule && work.role === "main" ? "bg-slate-100" : ""} onChange={(event) => updateWork(activePerson.id, work.id, "rate", event.target.value)} />
+                                  <FieldLabel>{enrollRule && work.role === "main" ? (work.rateManual ? "1日単価（変更あり）" : "1日単価（自動）") : "1日単価"}</FieldLabel>
+                                  <TextInput type="number" value={work.rate} className={enrollRule && work.role === "main" && work.rateManual && safeNumber(work.rate) !== ruleRateOf(work) ? "border-amber-400 bg-amber-50" : ""} onChange={(event) => updateWorkFields(activePerson.id, work.id, enrollRule && work.role === "main" ? { rate: event.target.value, rateManual: true } : { rate: event.target.value })} onBlur={() => finishRateInput(activePerson.id, work)} />
                                 </div>
                                 {enrollRule && work.role === "main" && (
-                                  <p className="md:col-span-6 rounded-2xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">{work.className}クラスの在籍 {countClassStudents(students, work.className)}人 → 1日 {yen(work.rate)}（1〜4人は2,000円、5人目から1人ごとに+500円。人数は生徒名簿の「在籍」から数えます）</p>
+                                  <div className="md:col-span-6 space-y-2">
+                                    {!work.className
+                                      ? <p className="rounded-2xl bg-red-50 px-3 py-2 text-xs font-bold leading-5 text-red-700">クラスを選んでください（メインの単価は、そのクラスの在籍人数で決まります）</p>
+                                      : <p className="rounded-2xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">{work.className}クラスの在籍 {countClassStudents(students, work.className)}人 → ルールの単価 {yen(ruleRateOf(work))}（1〜4人は2,000円、5人目から1人ごとに+500円。人数は生徒名簿の「在籍」から数えます）</p>}
+                                    {work.className && safeNumber(work.rate) !== ruleRateOf(work) && (
+                                      <div className="rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                                        <p className="font-bold">ルールの単価と違います（入力 {yen(work.rate)}／ルール {yen(ruleRateOf(work))}）</p>
+                                        {work.rateNote ? <p className="mt-1 whitespace-pre-wrap">報告：{work.rateNote}</p> : <p className="mt-1">理由の報告が必要です。</p>}
+                                        {!readOnly && !paidAt && <div className="mt-2 flex flex-wrap gap-2">
+                                          <button type="button" onClick={() => setRateReport({ personId: activePerson.id, workId: work.id })} className="rounded-full bg-amber-500 px-3 py-1 font-bold text-white">{work.rateNote ? "報告を直す" : "理由を報告する"}</button>
+                                          <button type="button" onClick={() => updateWorkFields(activePerson.id, work.id, { rate: ruleRateOf(work), rateManual: false, rateNote: "" })} className="rounded-full border border-amber-400 bg-white px-3 py-1 font-bold text-amber-800">ルールの単価に戻す</button>
+                                        </div>}
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
                                 {isCalendarOpen && (
                                   <div className="md:col-span-6">
@@ -1752,6 +1837,7 @@ function AdminSystem({ session, profile }) {
             </div>
             <Button onClick={() => setPreview(true)} className="w-full bg-sky-600 hover:bg-sky-700"><Eye className="mr-1 h-4 w-4" />先生からの見え方を確認</Button>
             {message && <div className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</div>}
+            <RateReportBox record={selected} />
             <PayBox record={selected} amount={totals.total - wh.taxTotal} busy={paying === selected.id} onPaid={(v, day) => setPaid(selected, v, day)} />
             <PayslipButtons records={records.filter((r) => r.target_month === selected.target_month).map((r) => (r.id === selected.id && !(Array.isArray(r.roster) && r.roster.length) ? { ...r, roster } : r))} onlyKeys={(Array.isArray(selected.people) ? selected.people : []).map((p) => personKey(p.name))} />
 
@@ -1888,6 +1974,7 @@ function AdminSystem({ session, profile }) {
                       <span className="mt-0.5 block text-xs text-slate-500">{r.issuer || "請求者未入力"}{r.submitted_at ? "　提出 " + shortDate(r.submitted_at) : ""}</span>
                       <span className="mt-1 block text-lg font-black text-slate-900">{yen(totals.total - whr.taxTotal)}<span className="ml-1 text-xs font-bold text-slate-500">振込額</span></span>
                       {unset ? <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">源泉未設定 {unset}名</span> : null}
+                      {rateReportsOf(r).length ? <span className="mt-1 mr-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">単価の報告あり</span> : null}
                       {resubmitted ? <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">振込後に再提出あり・要確認</span> : null}
                     </span>
                     <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-black ${paid ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>{paid ? `振込済み ${shortDate(r.paid_at)}` : "振込待ち"}</span>
@@ -2084,6 +2171,65 @@ function PayslipButtons({ records, onlyKeys = null, title = "給与明細書" })
         ))}
       </div>
       {open && <PayslipModal slip={open} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+
+// メイン単価がルールと違うときの報告ポップアップ（先生用）
+function RateReportModal({ work, personName, count, rule, onSave, onReset, onClose }) {
+  const [note, setNote] = useState(work.rateNote || "");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+      <div className="w-full max-w-md space-y-3 rounded-3xl bg-white p-5 shadow-xl">
+        <p className="text-lg font-black">単価がルールと違います</p>
+        <div className="rounded-2xl bg-slate-50 p-3 text-sm leading-6">
+          <p>{personName || "先生"}さん／{work.className}クラス メイン</p>
+          <p>在籍 {count}人 → ルールの単価 <b>{yen(rule)}</b></p>
+          <p>入力した単価 <b className="text-amber-700">{yen(work.rate)}</b></p>
+        </div>
+        <p className="text-xs leading-5 text-slate-500">この単価にする理由を書いてください。経理担当が確認します。</p>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="例：名簿に未登録の新入会者が2名いるため" className="w-full rounded-2xl border border-slate-300 p-3 text-base outline-none focus:border-amber-400" />
+        <Button onClick={() => onSave(note.trim())} disabled={!note.trim()} className="w-full bg-amber-500 hover:bg-amber-600">この内容で報告する</Button>
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={onReset} className="w-full text-sm">ルールの単価に戻す</Button>
+          <Button variant="ghost" onClick={onClose} className="w-full text-sm">あとで</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 先生からの単価の報告（経理画面用）
+function rateReportsOf(record) {
+  const roster = Array.isArray(record.roster) ? record.roster : [];
+  const out = [];
+  (Array.isArray(record.people) ? record.people : []).forEach((p) => (p.works || []).forEach((w) => {
+    if (!w.rateNote && !w.rateManual) return;
+    if (w.role !== "main") return;
+    const n = mainClassCount(w, roster);
+    const rule = n === null ? null : mainRateFor(n);
+    if (!w.rateNote && rule !== null && rule === safeNumber(w.rate)) return;
+    out.push({ key: `${p.id}-${w.id}`, name: p.name, cls: w.className, count: n, rule, rate: safeNumber(w.rate), note: w.rateNote || "" });
+  }));
+  return out;
+}
+function RateReportBox({ record }) {
+  const list = rateReportsOf(record);
+  if (!list.length) return null;
+  return (
+    <div className="rounded-3xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+      <h2 className="text-lg font-black text-amber-900">単価の報告</h2>
+      <p className="mt-1 text-xs leading-5 text-amber-800">メインの単価がルール（在籍1〜4人は2,000円、5人目から+500円）と違う行です。</p>
+      <div className="mt-3 space-y-2">
+        {list.map((r) => (
+          <div key={r.key} className="rounded-2xl bg-white p-3 text-sm">
+            <p className="font-black">{r.name}／{r.cls}クラス メイン</p>
+            <p className="text-xs text-slate-600">在籍 {r.count ?? "—"}人　ルール {r.rule === null ? "—" : yen(r.rule)}　→　請求 <b className="text-amber-700">{yen(r.rate)}</b></p>
+            <p className="mt-1 whitespace-pre-wrap rounded-xl bg-amber-50 p-2 text-sm">{r.note || "（報告なし）"}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

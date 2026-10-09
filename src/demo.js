@@ -5,7 +5,7 @@ export const DEMO_SCHOOL = {
   id: "demo-test",
   area: "テスト",
   name: "テスト体操教室（デモ）",
-  day: "土曜（月4回）",
+  day: "土曜（月3回）",
   venue: "テスト体育館",
   defaultRate: 1200,
   classes: [{ name: "A", time: "10:00-11:00" }, { name: "B", time: "11:10-12:10" }],
