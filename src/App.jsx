@@ -2057,18 +2057,17 @@ function PayslipSheet({ slip }) {
     <div id="payslip-pdf-area" className="mx-auto w-full max-w-[720px] bg-white p-6 text-slate-900 sm:p-10" style={{ fontFeatureSettings: '"palt"' }}>
       <div className="flex items-end justify-between border-b-4 border-emerald-600 pb-3">
         <div>
-          <p className="text-[11px] font-bold tracking-[0.3em] text-emerald-600">SOWERS PAYSLIP</p>
-          <h2 className="mt-1 text-3xl font-black tracking-[0.3em]">給与明細書</h2>
+          <h2 className="text-2xl font-black tracking-[0.2em] sm:text-3xl">給与明細書</h2>
         </div>
-        <p className="text-lg font-black">{y}年{Number(m)}月分</p>
+        <p className="whitespace-nowrap text-base font-black sm:text-lg">{y}年{Number(m)}月分</p>
       </div>
 
-      <div className="mt-5 grid grid-cols-[1fr_auto] items-end gap-4">
-        <div>
-          <p className="inline-block border-b border-slate-400 pb-1 pr-10 text-2xl font-black">{slip.name}　様</p>
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <p className="inline-block whitespace-nowrap border-b border-slate-400 pb-1 pr-6 text-xl font-black sm:text-2xl">{slip.name}　様</p>
           <p className="mt-2 text-sm text-slate-600">{slip.blocks.map((b) => `${b.school.area}｜${b.school.name}`).join("　/　")}</p>
         </div>
-        <div className="text-right text-xs leading-5 text-slate-600">
+        <div className="text-left text-xs leading-5 text-slate-600 sm:text-right">
           <p className="text-sm">支給日：<b className="text-slate-900">{slip.payDay || "お振込後に記載"}</b></p>
           <p className="font-bold text-slate-900">Sowers株式会社</p>
         </div>
@@ -2092,26 +2091,33 @@ function PayslipSheet({ slip }) {
         </tbody>
       </table>
 
-      <p className="mt-5 mb-1.5 text-sm font-black">支給</p>
-      <table className="w-full border-collapse text-sm">
-        <thead><tr className="bg-slate-50 text-xs text-slate-600"><th className={`${cell} text-left`}>内容</th><th className={`${cell} w-16 text-right`}>回数</th><th className={`${cell} w-24 text-right`}>単価</th><th className={`${cell} w-28 text-right`}>金額</th></tr></thead>
+      <p className="mt-5 mb-1.5 text-sm font-black">支給項目</p>
+      <table className="w-full table-fixed border-collapse text-sm">
+        <colgroup><col /><col className="w-28" /></colgroup>
         <tbody>
           {slip.blocks.map((b) => (
             <React.Fragment key={b.record.id || b.school.id}>
-              {slip.multi && <tr><td className={head} colSpan={4}>{b.school.name}</td></tr>}
+              {slip.multi && <tr><td className={head} colSpan={2}>{b.school.name}</td></tr>}
               {b.works.map((w) => (
-                <tr key={w.id}><td className={cell}>{w.workDetail}{w.isMain && <span className="ml-1 text-xs text-slate-500">（生徒 {w.students ?? "—"}名）</span>}</td><td className={`${cell} text-right`}>{w.days}</td><td className={`${cell} text-right`}>{yen(w.rate)}</td><td className={`${cell} text-right font-bold`}>{yen(w.amount)}</td></tr>
+                <tr key={w.id}>
+                  <td className={cell}>
+                    <span className="block font-bold">{w.workDetail}</span>
+                    <span className="block text-xs text-slate-500">{w.days}回 × {yen(w.rate)}{w.isMain ? `　生徒 ${w.students ?? "—"}名` : ""}</span>
+                  </td>
+                  <td className={`${cell} text-right font-bold`}>{yen(w.amount)}</td>
+                </tr>
               ))}
             </React.Fragment>
           ))}
-          <tr className="bg-slate-50"><td className={`${cell} font-black`} colSpan={3}>支給合計</td><td className={`${cell} text-right font-black`}>{yen(slip.pay)}</td></tr>
+          <tr className="bg-slate-50"><td className={`${cell} font-black`}>支給合計</td><td className={`${cell} text-right font-black`}>{yen(slip.pay)}</td></tr>
         </tbody>
       </table>
 
-      <p className="mt-5 mb-1.5 text-sm font-black">控除</p>
-      <table className="w-full border-collapse text-sm">
+      <p className="mt-5 mb-1.5 text-sm font-black">控除項目</p>
+      <table className="w-full table-fixed border-collapse text-sm">
+        <colgroup><col /><col className="w-28" /></colgroup>
         <tbody>
-          <tr><td className={cell}>源泉所得税</td><td className={`${cell} w-28 text-right font-bold`}>{yen(slip.tax)}</td></tr>
+          <tr><td className={cell}>源泉所得税</td><td className={`${cell} text-right font-bold`}>{yen(slip.tax)}</td></tr>
           {slip.handed.map((h) => (
             <tr key={h.id}><td className={cell}>{h.label}{slip.multi ? `　${h.school.name}` : ""}</td><td className={`${cell} text-right font-bold`}>{yen(h.amount)}</td></tr>
           ))}
@@ -2123,7 +2129,6 @@ function PayslipSheet({ slip }) {
         <span className="text-base font-black">差引支給額</span>
         <span className="text-2xl font-black">{yen(slip.net)}</span>
       </div>
-      <p className="mt-3 text-[11px] leading-5 text-slate-500">※源泉所得税は支給合計にかかります。経費の精算分はこの明細書に含みません。</p>
     </div>
   );
 }
